@@ -98,7 +98,10 @@
   <section id="s-game" class="screen">
     <div class="game-head">
       <div class="role" id="roleLabel">SEARCHER</div>
-      <div class="score mono" id="scoreLabel">R1 · 0–0</div>
+      <div class="head-right">
+        <div class="score mono" id="scoreLabel">R1 · 0–0</div>
+        <span id="voiceSlot"></span>
+      </div>
     </div>
 
     <div class="find-strip" id="findStrip">
@@ -214,11 +217,24 @@
 
 <!-- room voice chat -->
 <div class="voice-dock" id="voiceDock" hidden>
-  <button id="voiceJoinBtn" class="voice-btn">🎙 Voice</button>
-  <div id="voiceLive" hidden style="display: flex; align-items: center; gap: 8px;">
+  <button id="voiceJoinBtn" class="voice-btn">
+    <span class="voice-chip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg>
+    </span>
+    <span class="voice-lbl">Voice</span>
+  </button>
+  <div id="voiceLive" class="voice-live" hidden>
     <span class="voice-count" id="voiceCount"></span>
-    <button id="voiceMuteBtn" class="voice-btn round">🎙</button>
-    <button id="voiceLeaveBtn" class="voice-btn round">✕</button>
+    <button id="voiceMuteBtn" class="voice-btn round" aria-label="Toggle mute">
+      <span class="voice-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line class="slash" x1="2" y1="2" x2="22" y2="22"></line></svg>
+      </span>
+    </button>
+    <button id="voiceLeaveBtn" class="voice-btn round" aria-label="Leave voice">
+      <span class="voice-chip ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </span>
+    </button>
   </div>
 </div>
 

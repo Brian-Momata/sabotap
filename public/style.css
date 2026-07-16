@@ -503,44 +503,88 @@ input::placeholder { color: var(--text-3); }
 .overlay .sub { font-size: 14px; color: var(--text-2); max-width: 280px; line-height: 1.5; }
 .overlay .btn { max-width: 280px; }
 
+.head-right { display: flex; align-items: center; gap: 10px; }
+#voiceSlot { display: flex; align-items: center; }
+
 .voice-dock {
   position: fixed;
-  bottom: max(18px, env(safe-area-inset-bottom));
+  top: max(14px, env(safe-area-inset-top));
   right: 14px;
   z-index: 45;
   display: flex;
   align-items: center;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 6px;
-  box-shadow: 0 6px 20px oklch(0% 0 0 / 0.45);
+  padding: 5px;
 }
-.voice-dock.live { border-color: oklch(75% 0.17 150 / 0.6); }
+.voice-live { display: flex; align-items: center; gap: 6px; }
 .voice-btn {
   border: none;
   background: transparent;
-  color: var(--text-1);
+  color: var(--text-2);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  padding: 7px 12px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-radius: 999px;
 }
-.voice-btn:active { background: oklch(100% 0 0 / 0.08); }
-.voice-btn.round { width: 34px; height: 34px; padding: 0; display: flex; align-items: center; justify-content: center; }
-.voice-btn.muted { background: oklch(72% 0.19 40 / 0.25); }
+.voice-btn .voice-lbl { padding-right: 8px; }
+.voice-chip {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(28% 0.02 320);
+  color: oklch(60% 0.02 320);
+}
+.voice-chip svg { width: 14px; height: 14px; }
+.voice-chip.ghost { background: transparent; color: oklch(45% 0.02 320); }
+.voice-chip svg .slash { display: none; }
+#voiceJoinBtn .voice-chip {
+  background: oklch(72% 0.19 350 / 0.15);
+  color: var(--accent-searcher);
+}
+#voiceMuteBtn .voice-chip {
+  background: oklch(75% 0.17 150 / 0.15);
+  color: var(--win);
+}
+#voiceMuteBtn.muted .voice-chip {
+  background: oklch(28% 0.02 320);
+  color: oklch(60% 0.02 320);
+}
+#voiceMuteBtn.muted .voice-chip svg .slash { display: block; }
+.voice-btn:active .voice-chip { filter: brightness(1.25); }
 .voice-count {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--win);
-  padding-left: 8px;
+  padding-left: 9px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.voice-count::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--win); animation: glowpulse 1.4s ease-in-out infinite alternate; }
+.voice-count::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--win); animation: glowpulse 1.4s ease-in-out infinite alternate; }
+
+/* in-game: dock sits inline in the game header, not over the grid */
+.voice-dock.inhead {
+  position: static;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.voice-dock.inhead .voice-lbl { display: none; }
+.voice-dock.inhead .voice-chip { width: 24px; height: 24px; }
+.voice-dock.inhead .voice-chip svg { width: 12px; height: 12px; }
+.voice-dock.inhead .voice-count { font-size: 11px; padding-left: 0; }
+.voice-dock.inhead .voice-live { gap: 5px; }
 
 .toast {
   position: fixed;

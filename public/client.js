@@ -1079,15 +1079,17 @@ function renderVoiceDock() {
   const inRoom = !!state.room && !$('s-home').classList.contains('on');
   dock.hidden = !inRoom;
   if (!inRoom) return;
+  // during a match the dock lives in the game header so it never covers the grid
+  const inGame = $('s-game').classList.contains('on');
+  const wantParent = inGame ? $('voiceSlot') : document.body;
+  if (dock.parentElement !== wantParent) wantParent.appendChild(dock);
+  dock.classList.toggle('inhead', inGame);
   dock.classList.toggle('live', voice.joined);
   $('voiceJoinBtn').hidden = voice.joined;
   $('voiceLive').hidden = !voice.joined;
-  $('voiceLive').style.display = voice.joined ? 'flex' : 'none';
   if (voice.joined) {
     $('voiceCount').textContent = String(voice.members.length || 1);
-    const muteBtn = $('voiceMuteBtn');
-    muteBtn.textContent = voice.muted ? '🔇' : '🎙';
-    muteBtn.classList.toggle('muted', voice.muted);
+    $('voiceMuteBtn').classList.toggle('muted', voice.muted);
   }
 }
 
