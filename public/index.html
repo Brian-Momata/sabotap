@@ -155,6 +155,19 @@
 
 <div class="toast" id="toast"></div>
 
+<script>
+// Self-heal: if the stylesheet failed to load (e.g. a request raced a
+// sleeping free-tier host during cold start), reload once after wake-up.
+window.addEventListener('load', () => {
+  const styled = getComputedStyle(document.body).getPropertyValue('--bg-base').trim() !== '';
+  if (!styled && !sessionStorage.cssRetried) {
+    sessionStorage.cssRetried = '1';
+    setTimeout(() => location.reload(), 1200);
+  } else if (styled) {
+    delete sessionStorage.cssRetried;
+  }
+});
+</script>
 <script src="client.js"></script>
 </body>
 </html>
