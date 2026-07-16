@@ -381,7 +381,9 @@ async function main() {
     const vs1 = await V2.waitFor('voiceState', m => m.members.length === 1);
     assert(vs1.members[0].name === 'Pia' && vs1.members[0].muted === false, 'voice join broadcast to the room');
     V2.send({ t: 'voiceJoin' });
-    await V1.waitFor('voiceState', m => m.members.length === 2);
+    const vsBoth = await V1.waitFor('voiceState', m => m.members.length === 2);
+    assert(Array.isArray(vsBoth.peers) && vsBoth.peers.length === 1 && vsBoth.peers[0] === hv2.you.id,
+      'voiceState names the peers you may connect to');
     V1.send({ t: 'rtc', to: hv2.you.id, data: { sdp: { type: 'offer', sdp: 'x' } } });
     const relay = await V2.waitFor('rtc');
     assert(relay.from === hv1.you.id && relay.data.sdp.type === 'offer', 'rtc signaling relayed between voice members');
@@ -392,6 +394,41 @@ async function main() {
     const vsLeave = await V1.waitFor('voiceState', m => m.members.length === 1);
     assert(vsLeave.members[0].id === hv1.you.id, 'voice leave removes member');
     V1.close(); V2.close();
+
+    // --- voice scoping: whole room in the lobby, match pairs during play ---
+    const U = [new Client('U1'), new Client('U2'), new Client('U3')];
+    await Promise.all(U.map(c => c.connect()));
+    U.forEach((c, i) => c.send({ t: 'hello', playerId: `test_u${i}_` + Date.now(), name: 'U' + (i + 1) }));
+    const hu = await Promise.all(U.map(c => c.waitFor('hello')));
+    const uid = hu.map(h => h.you.id);
+    U[0].send({ t: 'create' });
+    const uroom = await U[0].waitFor('room');
+    U[0].send({ t: 'settings', mode: 'tournament' });
+    await U[0].waitFor('room', m => m.settings.mode === 'tournament');
+    U[1].send({ t: 'join', code: uroom.code });
+    await U[1].waitFor('room');
+    U[2].send({ t: 'join', code: uroom.code });
+    await U[0].waitFor('room', m => m.players.length === 3);
+    U.forEach(c => c.send({ t: 'voiceJoin' }));
+    const vsAll = await U[0].waitFor('voiceState', m => m.members.length === 3);
+    assert(vsAll.peers.length === 2 && !vsAll.peers.includes(uid[0]), 'lobby voice channel spans the whole room');
+    U[1].send({ t: 'ready', ready: true });
+    U[2].send({ t: 'ready', ready: true });
+    await U[0].waitFor('room', m => m.players.filter(p => p.ready).length === 3);
+    U.forEach(c => c.drain('voiceState'));
+    U[0].send({ t: 'start' });
+    // stage 1 of the 3-player round-robin: seat 0 sits out, seats 1 & 2 play
+    const vsPair = await U[1].waitFor('voiceState', m => m.peers.length === 1, 10000);
+    assert(vsPair.peers[0] === uid[2], 'in-game voice narrows to your match opponent');
+    const vsBye = await U[0].waitFor('voiceState', m => m.peers.length === 0, 10000);
+    assert(vsBye.members.length === 3, 'sitting player still sees who is in voice but talks to no one');
+    // relay enforcement: cross-group rtc is dropped, in-pair rtc flows
+    U[0].send({ t: 'rtc', to: uid[1], data: { sdp: { type: 'offer', sdp: 'blocked' } } });
+    await sleep(150);
+    U[2].send({ t: 'rtc', to: uid[1], data: { sdp: { type: 'offer', sdp: 'paired' } } });
+    const relayed = await U[1].waitFor('rtc');
+    assert(relayed.from === uid[2] && relayed.data.sdp.sdp === 'paired', 'rtc relay only flows inside your voice group');
+    U.forEach(c => c.close());
 
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {

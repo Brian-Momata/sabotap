@@ -195,7 +195,7 @@ function renderLobby() {
     const chip = p.seat === (r.host || 0)
       ? '<span class="row-chip">HOST</span>'
       : (p.ready ? '<span class="row-chip ready">READY</span>' : '<span class="row-chip">NOT READY</span>');
-    row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${p.seat === state.seat ? ' (you)' : ''}</span>${chip}`;
+    row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${p.seat === state.seat ? ' (you)' : ''}</span>${micBadge(p.id)}${chip}`;
     wrap.append(row);
   }
   if (r.players.length < maxP) {
@@ -243,6 +243,16 @@ function renderLobby() {
       btn.textContent = "I'm Ready";
     }
   }
+}
+
+function micBadge(playerId) {
+  const m = voice.members.find(x => x.id === playerId);
+  if (!m) return '';
+  return `<span class="mic-badge${m.muted ? ' muted' : ''}" title="${m.muted ? 'In voice (muted)' : 'In voice'}">`
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>'
+    + '<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line>'
+    + '<line class="slash" x1="2" y1="2" x2="22" y2="22"></line></svg></span>';
 }
 
 function renderSegs(groupId, options, selected, enabled, onPick, label) {
@@ -859,12 +869,14 @@ const handlers = {
 
   voiceState(msg) {
     voice.members = msg.members || [];
+    voice.allowed = Array.isArray(msg.peers) ? new Set(msg.peers) : null;
     syncVoicePeers();
     renderVoiceDock();
+    if (state.phase === 'lobby' && state.room) renderLobby();
   },
 
   async rtc(msg) {
-    if (!voice.joined) return;
+    if (!voice.joined || !voiceAllowed(msg.from)) return;
     const entry = voice.peers.get(msg.from) || voicePeer(msg.from, false);
     const pc = entry.pc;
     try {
@@ -980,8 +992,14 @@ renderPrefButtons();
 
 /* ---------- room voice chat (WebRTC mesh, signaled over the game socket) ---------- */
 
-const voice = { joined: false, muted: false, stream: null, peers: new Map(), members: [] };
+const voice = { joined: false, muted: false, stream: null, peers: new Map(), members: [], allowed: null };
 window.voice = voice; // exposed for automated tests
+
+// The server scopes who may talk to whom (everyone in the lobby, your match
+// opponent during a game). null means no restriction (older server).
+function voiceAllowed(id) {
+  return voice.allowed ? voice.allowed.has(id) : true;
+}
 
 function rtcConfig() {
   return { iceServers: (state.config && state.config.iceServers) || [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -1018,7 +1036,9 @@ function leaveVoice(notify = true) {
   voice.joined = false;
   voice.muted = false;
   voice.members = [];
+  voice.allowed = null;
   renderVoiceDock();
+  if (state.phase === 'lobby' && state.room) renderLobby();
 }
 
 function toggleVoiceMute() {
@@ -1040,7 +1060,14 @@ function voicePeer(id, initiator) {
   entry = { pc, audio, pendingIce: [] };
   voice.peers.set(id, entry);
   voice.stream.getTracks().forEach(tr => pc.addTrack(tr, voice.stream));
-  pc.ontrack = e => { audio.srcObject = e.streams[0]; };
+  pc.ontrack = e => {
+    audio.srcObject = e.streams[0];
+    // Autoplay can be blocked when the track arrives outside a user gesture
+    // (e.g. someone joins voice long after we did) — retry on the next tap.
+    audio.play().catch(() => {
+      document.addEventListener('pointerdown', () => audio.play().catch(() => {}), { once: true });
+    });
+  };
   pc.onicecandidate = e => { if (e.candidate) send({ t: 'rtc', to: id, data: { ice: e.candidate } }); };
   if (initiator) {
     pc.onnegotiationneeded = async () => {
@@ -1065,10 +1092,10 @@ function syncVoicePeers() {
   if (!voice.joined || !state.you) return;
   const ids = new Set(voice.members.map(m => m.id));
   for (const id of [...voice.peers.keys()]) {
-    if (!ids.has(id)) dropVoicePeer(id);
+    if (!ids.has(id) || !voiceAllowed(id)) dropVoicePeer(id);
   }
   for (const m of voice.members) {
-    if (m.id === state.you.id || voice.peers.has(m.id)) continue;
+    if (m.id === state.you.id || !voiceAllowed(m.id) || voice.peers.has(m.id)) continue;
     // Exactly one side initiates per pair: the lexically larger id.
     if (state.you.id > m.id) voicePeer(m.id, true);
   }
@@ -1088,7 +1115,9 @@ function renderVoiceDock() {
   $('voiceJoinBtn').hidden = voice.joined;
   $('voiceLive').hidden = !voice.joined;
   if (voice.joined) {
-    $('voiceCount').textContent = String(voice.members.length || 1);
+    // Count only the people you can actually hear (your channel), yourself included.
+    const n = voice.members.filter(m => (state.you && m.id === state.you.id) || voiceAllowed(m.id)).length;
+    $('voiceCount').textContent = String(n || 1);
     $('voiceMuteBtn').classList.toggle('muted', voice.muted);
   }
 }
