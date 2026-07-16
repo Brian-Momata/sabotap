@@ -96,9 +96,9 @@ async function playRoundAsSearcherWin(clients, seats, roundMsgAll) {
   const liveC = await caller.waitFor('live');
   assert(liveS.target === roundMsgAll[callerSeat].grid[3], 'target matches picked cell');
   assert(liveC.target === liveS.target, 'caller knows the target');
-  assert(Array.isArray(liveS.grid) && liveS.grid.length === 36, 'searcher live grid has 36 cells');
+  assert(Array.isArray(liveS.grid) && liveS.grid.length === 56, 'searcher live grid has 56 cells');
   const ti = liveS.grid.indexOf(liveS.target);
-  const wrongIdx = (ti + 1) % 36;
+  const wrongIdx = (ti + 1) % 56;
   searcher.send({ t: 'tap', index: wrongIdx });
   const wrong = await searcher.waitFor('wrong');
   assert(wrong.index === wrongIdx, 'wrong tap echoed with index');
@@ -198,19 +198,24 @@ async function main() {
       assert(ch.n === want, `charge ${want} banked`);
     }
 
-    // fire blur, decoys, swap
+    // fire blur, then blur again (cooldown), then decoys, swap
     caller2.send({ t: 'sabotage', kind: 'blur' });
     const sabBlur = await searcher2.waitFor('sabotage', m => m.kind === 'blur');
     assert(sabBlur.durationMs > 0, 'blur sabotage lands on searcher');
+    caller2.send({ t: 'sabotage', kind: 'blur' });
+    const cooldownErr = await caller2.waitFor('error');
+    assert(/recharging/i.test(cooldownErr.msg), 'repeat blur blocked by cooldown');
     caller2.send({ t: 'sabotage', kind: 'decoys' });
     const sabDec = await searcher2.waitFor('sabotage', m => m.kind === 'decoys');
     assert(sabDec.indices.length === 2 && sabDec.indices.every(i => live2S.grid[i] !== live2S.target), 'decoys never on target');
+    const targetIdx2 = live2S.grid.indexOf(live2S.target);
     caller2.send({ t: 'sabotage', kind: 'swap' });
     const sabSwap = await searcher2.waitFor('sabotage', m => m.kind === 'swap');
     assert(sabSwap.a !== sabSwap.b, 'swap has two distinct indices');
+    assert(sabSwap.a !== targetIdx2 && sabSwap.b !== targetIdx2, 'swap never moves the target');
     caller2.send({ t: 'sabotage', kind: 'zoom' });
     const noCharge = await caller2.waitFor('error');
-    assert(/charge/i.test(noCharge.msg), 'sabotage blocked without charges');
+    assert(/no charges/i.test(noCharge.msg), 'sabotage blocked without charges');
 
     // swap adjudication: track shown layout client-side, tap the target's current cell
     const shown = [...live2S.grid];

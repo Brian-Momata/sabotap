@@ -1,6 +1,6 @@
 # Sabotap
 
-A real-time, two-phone number search game. Each round one player is the **Searcher** — racing to tap a target number on a 6×6 grid before the fuse burns out — and the other is the **Caller**, who picks the target, then solves rapid odd-one-out puzzles to bank sabotage charges and disrupt the Searcher's grid live. Roles swap every round; first to 3 round wins takes the match.
+A real-time, two-phone number search game. Each round one player is the **Searcher** — racing to tap a target number on a 7×8 grid before the fuse burns out — and the other is the **Caller**, who picks the target, then solves rapid odd-one-out puzzles to bank sabotage charges and disrupt the Searcher's grid live. Roles swap every round; first to 3 round wins takes the match.
 
 Built from the *Number Hunt Design System* (Claude Design) and its validated single-device prototype.
 
@@ -17,7 +17,7 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 
 1. One player taps **Create Room**, shares the room code (or the invite link / a friend invite).
 2. The other joins; the host picks match length (first to 2/3/5) and difficulty — Casual (24s fuse), Tense (16s), or Frantic (10s). Higher difficulty also speeds up the Caller's puzzles and makes the odd digit a visual lookalike from the start.
-3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places — sometimes the target), **Zoom** (forces panning), **Invert**.
+3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Each sabotage has its own cooldown, and none ever touches or highlights the target tile. Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places), **Zoom** (forces panning), **Invert**.
 4. Correct tap → Searcher takes the round. Fuse fills → Caller takes it.
 
 ## Friends

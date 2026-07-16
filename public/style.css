@@ -289,23 +289,29 @@ input::placeholder { color: var(--text-3); }
 }
 .grid {
   display: grid;
-  gap: 7px;
-  transition: width 0.35s ease, filter 0.25s ease;
+  gap: 6px;
+  grid-auto-rows: 1fr;
+  transition: width 0.35s ease, height 0.35s ease, filter 0.25s ease;
+  /* Absolute so the grid always fills the (flex-sized) outer container —
+     percentage heights can't resolve through this page's min-height chain. */
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
+  height: 100%;
 }
-.grid-outer.zoomed .grid { width: 180%; }
+.grid-outer.zoomed .grid { width: 185%; height: 185%; }
 .grid-outer.blurred .grid { filter: blur(5px); }
 .grid-outer.inverted .grid { filter: invert(1); }
 
 .cell {
-  aspect-ratio: 1;
   border-radius: 10px;
   background: var(--bg-raised);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: var(--mono);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   position: relative;

@@ -30,6 +30,7 @@ const state = {
   maxCharges: 3,
   sabotages: [],
   puzzleId: null,
+  cooldowns: {},
   pendingInviteFriend: null,
   pendingJoinCode: null,
   rematchVotes: [null, null],
@@ -303,6 +304,7 @@ function enterPickPhase(msg) {
   $('roundOverlay').classList.remove('on');
   show('s-game');
   resetEffects();
+  state.cooldowns = {};
   if (msg.role === 'caller') {
     state.gridCols = msg.gridCols;
     $('findLbl').textContent = 'PICK THE TARGET';
@@ -373,7 +375,7 @@ function renderCharges() {
     row.append(pip);
   }
   $('chargeLabel').textContent = `${state.charges} / ${state.maxCharges} CHARGES`;
-  document.querySelectorAll('.sab-btn').forEach(b => { b.disabled = state.charges < 1; });
+  updateSabButtons();
 }
 
 function renderSabotages() {
@@ -382,12 +384,26 @@ function renderSabotages() {
   for (const s of state.sabotages) {
     const b = document.createElement('button');
     b.className = 'sab-btn';
+    b.dataset.kind = s.kind;
     b.innerHTML = `<span>${esc(s.name)}</span><small>${esc(s.detail)}</small>`;
-    b.disabled = state.charges < 1;
     b.onclick = () => send({ t: 'sabotage', kind: s.kind });
     list.append(b);
   }
+  updateSabButtons();
 }
+
+function updateSabButtons() {
+  const now = Date.now();
+  document.querySelectorAll('.sab-btn').forEach(b => {
+    const spec = state.sabotages.find(s => s.kind === b.dataset.kind);
+    const until = state.cooldowns[b.dataset.kind] || 0;
+    const coolingS = Math.ceil((until - now) / 1000);
+    b.disabled = state.charges < 1 || coolingS > 0;
+    const small = b.querySelector('small');
+    if (small && spec) small.textContent = coolingS > 0 ? `recharging ${coolingS}s` : spec.detail;
+  });
+}
+setInterval(updateSabButtons, 250);
 
 /* ---------- sabotage effects (searcher) ---------- */
 
@@ -455,7 +471,20 @@ function handleSabotage(msg) {
     effectTimers.push(setTimeout(() => outer.classList.remove('inverted'), msg.durationMs));
   } else if (msg.kind === 'zoom') {
     outer.classList.add('zoomed');
-    effectTimers.push(setTimeout(() => outer.classList.remove('zoomed'), msg.durationMs));
+    // Pan to the quadrant the server chose (the far side from the target).
+    const pan = () => {
+      if (msg.focus) {
+        outer.scrollLeft = msg.focus.x ? outer.scrollWidth - outer.clientWidth : 0;
+        outer.scrollTop = msg.focus.y ? outer.scrollHeight - outer.clientHeight : 0;
+      }
+    };
+    effectTimers.push(setTimeout(pan, 60));
+    effectTimers.push(setTimeout(pan, 380));
+    effectTimers.push(setTimeout(() => {
+      outer.classList.remove('zoomed');
+      outer.scrollLeft = 0;
+      outer.scrollTop = 0;
+    }, msg.durationMs));
   } else if (msg.kind === 'decoys') {
     const cs = cells();
     msg.indices.forEach(i => cs[i] && cs[i].classList.add('decoy'));
@@ -611,6 +640,8 @@ const handlers = {
   },
 
   sabotageFired(msg) {
+    state.cooldowns[msg.kind] = Date.now() + (msg.cooldownMs || 0);
+    updateSabButtons();
     $('callerFeed').textContent = `${msg.name} fired ⚡`;
     sfx.sabotage();
   },
