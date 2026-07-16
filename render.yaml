@@ -1,0 +1,19 @@
+# Render.com blueprint for Sabotap (free tier, no card required).
+# Deploy: push this repo to GitHub, then at https://dashboard.render.com
+# choose "New +" → "Blueprint" and point it at the repo.
+#
+# Free-tier trade-offs:
+# - The service sleeps after ~15 min idle; first request takes ~30-60s to wake.
+# - The disk is ephemeral: friend lists (data/store.json) reset on restarts.
+#   Matches are unaffected (rooms are in-memory by design).
+services:
+  - type: web
+    name: sabotap
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
