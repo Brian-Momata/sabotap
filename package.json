@@ -1,0 +1,15 @@
+{
+  "name": "sabotap",
+  "version": "0.1.0",
+  "description": "Sabotap — real-time two-player number search game. The Searcher races a fuse; the Caller solves puzzles to earn sabotage charges.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/e2e.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

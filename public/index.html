@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#221c22">
+<title>Sabotap</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- HOME -->
+  <section id="s-home" class="screen">
+    <div style="margin: 26px 0 6px;">
+      <div class="eyebrow" style="color: var(--accent-searcher); margin-bottom: 10px;">Two phones · one grid</div>
+      <div class="title">Sabotap</div>
+      <div class="subtitle">Find the number before the fuse burns out — while your opponent sabotages the board.</div>
+    </div>
+
+    <div class="section-label">You</div>
+    <input type="text" id="nameInput" placeholder="Your name" maxlength="20" autocomplete="off">
+    <div class="you-tag">Friend tag: <b id="youTag">—</b></div>
+
+    <div style="margin-top: 22px;" class="stack">
+      <button class="btn btn-primary" id="createBtn">Create Room</button>
+      <div class="row">
+        <input type="text" id="codeInput" class="mono" placeholder="ROOM CODE" maxlength="8" autocomplete="off">
+        <button class="chip-btn ghost" id="joinBtn" style="padding: 14px 20px;">Join</button>
+      </div>
+    </div>
+
+    <div class="section-label">Friends</div>
+    <div id="friendList"></div>
+    <div class="row" style="margin-top: 4px;">
+      <input type="text" id="friendTagInput" class="mono" placeholder="ADD BY TAG · BRI#4821" maxlength="10" autocomplete="off">
+      <button class="chip-btn ghost" id="friendAddBtn" style="padding: 14px 16px;">Add</button>
+    </div>
+
+    <footer class="settings-row">
+      <button id="soundToggle">Sound: on</button>
+      <button id="hapticsToggle">Haptics: on</button>
+    </footer>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="s-lobby" class="screen">
+    <div class="eyebrow" style="text-align: center; margin: 10px 0 30px;">Lobby</div>
+    <div class="card code-card">
+      <div class="eyebrow">Room Code</div>
+      <div class="code-value" id="lobbyCode">—</div>
+    </div>
+    <button class="btn btn-ghost" id="shareBtn" style="margin: 12px 0 22px;">Share invite link</button>
+
+    <div id="lobbyPlayers"></div>
+
+    <div class="section-label">First to</div>
+    <div class="setting-group" id="roundsGroup"></div>
+    <div class="section-label">Fuse</div>
+    <div class="setting-group" id="fuseGroup"></div>
+
+    <div style="margin-top: auto; padding-top: 22px;" class="stack">
+      <button class="btn btn-primary" id="startBtn" disabled>Waiting…</button>
+      <button class="btn btn-ghost" id="leaveBtn">Leave</button>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section id="s-game" class="screen">
+    <div class="game-head">
+      <div class="role" id="roleLabel">SEARCHER</div>
+      <div class="score mono" id="scoreLabel">R1 · 0–0</div>
+    </div>
+
+    <div class="find-strip" id="findStrip">
+      <div class="lbl" id="findLbl">FIND</div>
+      <div class="num" id="findNum">—</div>
+    </div>
+
+    <div class="fuse-wrap" id="fuseWrap">
+      <div class="fuse-label"><span id="fuseName">FUSE</span><span id="fusePct">0%</span></div>
+      <div class="fuse-track"><div class="fuse-fill" id="fuseFill"></div></div>
+    </div>
+
+    <!-- searcher / pick grid -->
+    <div class="grid-outer" id="gridOuter" hidden>
+      <div class="grid" id="grid"></div>
+    </div>
+
+    <!-- searcher waiting for pick -->
+    <div class="wait-box" id="waitBox" hidden>
+      <div class="pulse-dot"></div>
+      <div id="waitText">Caller is choosing a target…</div>
+    </div>
+
+    <!-- caller live panel -->
+    <div id="callerPanel" hidden style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+      <div class="puzzle-card">
+        <div class="ptimer-track"><div class="ptimer-fill" id="ptimerFill"></div></div>
+        <div class="puzzle-row" id="puzzleRow"></div>
+        <div class="puzzle-hint">Tap the odd one out</div>
+      </div>
+      <div class="charge-row" id="chargeRow"></div>
+      <div class="charge-label" id="chargeLabel">0 / 3 CHARGES</div>
+      <div class="sab-list" id="sabList"></div>
+      <div class="caller-feed" id="callerFeed"></div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="s-results" class="screen results">
+    <div class="eyebrow" style="margin: 18px 0 34px;">Match Complete</div>
+    <div class="verdict" id="verdict">YOU WIN</div>
+    <div class="final-score" id="finalScore">3–1</div>
+    <div class="history-dots" id="historyDots"></div>
+    <div class="round-log" id="roundLog"></div>
+    <div class="stack" style="margin-top: auto;">
+      <button class="btn btn-ghost" id="addFriendResultBtn" hidden>Add opponent as friend</button>
+      <button class="btn btn-primary" id="rematchBtn">Rematch</button>
+      <button class="btn btn-ghost" id="backHomeBtn">Back to Lobby</button>
+    </div>
+  </section>
+
+</div>
+
+<!-- sabotage feedback -->
+<div class="edge-glow" id="edgeGlow"></div>
+<div class="sab-banner" id="sabBanner"></div>
+
+<!-- round end overlay -->
+<div class="overlay" id="roundOverlay">
+  <div class="eyebrow" id="roundOverlayEyebrow">Round 1</div>
+  <div class="big" id="roundOverlayTitle"></div>
+  <div class="sub" id="roundOverlaySub"></div>
+</div>
+
+<!-- invite overlay -->
+<div class="overlay" id="inviteOverlay">
+  <div class="eyebrow">Invite</div>
+  <div class="big" id="inviteTitle"></div>
+  <div class="sub" id="inviteSub"></div>
+  <button class="btn btn-primary" id="inviteAcceptBtn">Join room</button>
+  <button class="btn btn-ghost" id="inviteDeclineBtn">Not now</button>
+</div>
+
+<!-- opponent reconnecting overlay -->
+<div class="overlay" id="pauseOverlay">
+  <div class="pulse-dot"></div>
+  <div class="big" style="font-size: 20px;">Opponent reconnecting…</div>
+  <div class="sub">The round is paused. If they don't come back, you'll return to the lobby.</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="client.js"></script>
+</body>
+</html>
