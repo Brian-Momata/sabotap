@@ -20,6 +20,10 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Each sabotage has its own cooldown, and none ever touches or highlights the target tile. Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places), **Zoom** (forces panning), **Invert**.
 4. Correct tap → Searcher takes the round. Fuse fills → Caller takes it.
 
+## Voice chat
+
+Every room has built-in voice chat — tap the 🎙 pill (bottom-right) to join; everyone in the room who joins can talk, across the lobby, matches, and tournament waits. Audio is peer-to-peer WebRTC (the game server only relays call setup), with mute and leave controls. If two players are on very restrictive networks the call may not connect — set `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` env vars to add a TURN relay for those cases.
+
 ## Tournament mode
 
 Flip the lobby to **Tournament** (3–8 players, same room code / invites). It runs a circle-method **round-robin**: everyone plays everyone once, matches within a stage run simultaneously, and each match is exactly 2 rounds (both players search once) worth 1 point per round won. Between matches you see live standings and a worst-case countdown until the next pairing; pairings announce your opponent with their rank and points. Odd player counts get one bye each. Dropouts forfeit their current match (opponent takes the remaining rounds) and future opponents get walkovers. The final leaderboard crowns the winner; ties share a rank.

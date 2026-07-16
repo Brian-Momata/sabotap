@@ -23,6 +23,18 @@ app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size, online
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+function iceServers() {
+  const servers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  if (process.env.TURN_URL) {
+    servers.push({
+      urls: process.env.TURN_URL,
+      username: process.env.TURN_USERNAME || '',
+      credential: process.env.TURN_CREDENTIAL || '',
+    });
+  }
+  return servers;
+}
+
 function destroyRoom(code) {
   const room = rooms.get(code);
   if (room) room.players.forEach(p => roomOf.delete(p.id));
@@ -90,6 +102,7 @@ wss.on('connection', ws => {
           name: CONFIG.name,
           roundsToWinOptions: CONFIG.roundsToWinOptions,
           difficulties: Object.entries(CONFIG.difficulties).map(([key, d]) => ({ key, name: d.name, fuseMs: d.fuseMs })),
+          iceServers: iceServers(),
         },
       });
       notifyPresence(id);
@@ -165,6 +178,28 @@ wss.on('connection', ws => {
     rematch() {
       const room = roomFor(me.id);
       if (room) room.rematch(room.seatOf(me.id));
+    },
+
+    voiceJoin() {
+      const room = roomFor(me.id);
+      if (room) room.voiceJoin(room.seatOf(me.id));
+    },
+
+    voiceLeave() {
+      const room = roomFor(me.id);
+      if (room) room.voiceLeave(room.seatOf(me.id));
+    },
+
+    voiceMute(msg) {
+      const room = roomFor(me.id);
+      if (room) room.voiceMute(room.seatOf(me.id), !!msg.muted);
+    },
+
+    rtc(msg) {
+      const room = roomFor(me.id);
+      if (room && typeof msg.to === 'string' && msg.data && typeof msg.data === 'object') {
+        room.relayRtc(me.id, msg.to, msg.data);
+      }
     },
 
     friendAdd(msg) {

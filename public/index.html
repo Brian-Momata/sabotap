@@ -212,6 +212,16 @@
   <div class="sub">The round is paused. If they don't come back, you'll return to the lobby.</div>
 </div>
 
+<!-- room voice chat -->
+<div class="voice-dock" id="voiceDock" hidden>
+  <button id="voiceJoinBtn" class="voice-btn">🎙 Voice</button>
+  <div id="voiceLive" hidden style="display: flex; align-items: center; gap: 8px;">
+    <span class="voice-count" id="voiceCount"></span>
+    <button id="voiceMuteBtn" class="voice-btn round">🎙</button>
+    <button id="voiceLeaveBtn" class="voice-btn round">✕</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>

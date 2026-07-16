@@ -58,6 +58,7 @@ function connect() {
     if (h) h(msg);
   };
   ws.onclose = () => {
+    leaveVoice(false); // server already dropped us from voice on disconnect
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(8000, reconnectDelay * 2);
   };
@@ -103,6 +104,7 @@ function buzz(pattern) {
 function show(screen) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
   $(screen).classList.add('on');
+  if (typeof renderVoiceDock === 'function') renderVoiceDock();
 }
 
 let toastTimer = null;
@@ -660,9 +662,11 @@ const handlers = {
   },
 
   left() {
+    leaveVoice(false);
     state.room = null;
     state.phase = 'home';
     show('s-home');
+    renderVoiceDock();
   },
 
   roundStart(msg) {
@@ -853,6 +857,31 @@ const handlers = {
     // phase 'playing' without a match: a tWaiting follow-up is on its way
   },
 
+  voiceState(msg) {
+    voice.members = msg.members || [];
+    syncVoicePeers();
+    renderVoiceDock();
+  },
+
+  async rtc(msg) {
+    if (!voice.joined) return;
+    const entry = voice.peers.get(msg.from) || voicePeer(msg.from, false);
+    const pc = entry.pc;
+    try {
+      if (msg.data.sdp) {
+        await pc.setRemoteDescription(msg.data.sdp);
+        if (msg.data.sdp.type === 'offer') {
+          await pc.setLocalDescription();
+          send({ t: 'rtc', to: msg.from, data: { sdp: pc.localDescription } });
+        }
+        while (entry.pendingIce.length) pc.addIceCandidate(entry.pendingIce.shift()).catch(() => {});
+      } else if (msg.data.ice) {
+        if (pc.remoteDescription) await pc.addIceCandidate(msg.data.ice);
+        else entry.pendingIce.push(msg.data.ice);
+      }
+    } catch {}
+  },
+
   toast(msg) {
     toast(msg.msg);
   },
@@ -948,6 +977,123 @@ function renderPrefButtons() {
 $('soundToggle').onclick = () => { prefs.sound = !prefs.sound; renderPrefButtons(); };
 $('hapticsToggle').onclick = () => { prefs.haptics = !prefs.haptics; renderPrefButtons(); };
 renderPrefButtons();
+
+/* ---------- room voice chat (WebRTC mesh, signaled over the game socket) ---------- */
+
+const voice = { joined: false, muted: false, stream: null, peers: new Map(), members: [] };
+window.voice = voice; // exposed for automated tests
+
+function rtcConfig() {
+  return { iceServers: (state.config && state.config.iceServers) || [{ urls: 'stun:stun.l.google.com:19302' }] };
+}
+
+async function joinVoice() {
+  if (voice.joined) return;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch {
+    toast('Microphone blocked — allow mic access to use voice chat.');
+    return;
+  }
+  voice.stream = stream;
+  voice.joined = true;
+  voice.muted = false;
+  send({ t: 'voiceJoin' });
+  renderVoiceDock();
+}
+
+function leaveVoice(notify = true) {
+  if (!voice.joined) return;
+  if (notify) send({ t: 'voiceLeave' });
+  voice.peers.forEach(entry => {
+    try { entry.pc.close(); } catch {}
+    entry.audio.remove();
+  });
+  voice.peers.clear();
+  if (voice.stream) voice.stream.getTracks().forEach(tr => tr.stop());
+  voice.stream = null;
+  voice.joined = false;
+  voice.muted = false;
+  voice.members = [];
+  renderVoiceDock();
+}
+
+function toggleVoiceMute() {
+  if (!voice.joined) return;
+  voice.muted = !voice.muted;
+  voice.stream.getAudioTracks().forEach(tr => { tr.enabled = !voice.muted; });
+  send({ t: 'voiceMute', muted: voice.muted });
+  renderVoiceDock();
+}
+
+function voicePeer(id, initiator) {
+  let entry = voice.peers.get(id);
+  if (entry) return entry;
+  const pc = new RTCPeerConnection(rtcConfig());
+  const audio = document.createElement('audio');
+  audio.autoplay = true;
+  audio.playsInline = true;
+  document.body.append(audio);
+  entry = { pc, audio, pendingIce: [] };
+  voice.peers.set(id, entry);
+  voice.stream.getTracks().forEach(tr => pc.addTrack(tr, voice.stream));
+  pc.ontrack = e => { audio.srcObject = e.streams[0]; };
+  pc.onicecandidate = e => { if (e.candidate) send({ t: 'rtc', to: id, data: { ice: e.candidate } }); };
+  if (initiator) {
+    pc.onnegotiationneeded = async () => {
+      try {
+        await pc.setLocalDescription();
+        send({ t: 'rtc', to: id, data: { sdp: pc.localDescription } });
+      } catch {}
+    };
+  }
+  return entry;
+}
+
+function dropVoicePeer(id) {
+  const entry = voice.peers.get(id);
+  if (!entry) return;
+  try { entry.pc.close(); } catch {}
+  entry.audio.remove();
+  voice.peers.delete(id);
+}
+
+function syncVoicePeers() {
+  if (!voice.joined || !state.you) return;
+  const ids = new Set(voice.members.map(m => m.id));
+  for (const id of [...voice.peers.keys()]) {
+    if (!ids.has(id)) dropVoicePeer(id);
+  }
+  for (const m of voice.members) {
+    if (m.id === state.you.id || voice.peers.has(m.id)) continue;
+    // Exactly one side initiates per pair: the lexically larger id.
+    if (state.you.id > m.id) voicePeer(m.id, true);
+  }
+}
+
+function renderVoiceDock() {
+  const dock = $('voiceDock');
+  const inRoom = !!state.room && !$('s-home').classList.contains('on');
+  dock.hidden = !inRoom;
+  if (!inRoom) return;
+  dock.classList.toggle('live', voice.joined);
+  $('voiceJoinBtn').hidden = voice.joined;
+  $('voiceLive').hidden = !voice.joined;
+  $('voiceLive').style.display = voice.joined ? 'flex' : 'none';
+  if (voice.joined) {
+    $('voiceCount').textContent = String(voice.members.length || 1);
+    const muteBtn = $('voiceMuteBtn');
+    muteBtn.textContent = voice.muted ? '🔇' : '🎙';
+    muteBtn.classList.toggle('muted', voice.muted);
+  }
+}
+
+$('voiceJoinBtn').onclick = joinVoice;
+$('voiceLeaveBtn').onclick = () => leaveVoice(true);
+$('voiceMuteBtn').onclick = toggleVoiceMute;
 
 /* ---------- pwa install prompt ---------- */
 

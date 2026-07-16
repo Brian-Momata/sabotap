@@ -503,6 +503,45 @@ input::placeholder { color: var(--text-3); }
 .overlay .sub { font-size: 14px; color: var(--text-2); max-width: 280px; line-height: 1.5; }
 .overlay .btn { max-width: 280px; }
 
+.voice-dock {
+  position: fixed;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  right: 14px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 6px;
+  box-shadow: 0 6px 20px oklch(0% 0 0 / 0.45);
+}
+.voice-dock.live { border-color: oklch(75% 0.17 150 / 0.6); }
+.voice-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 7px 12px;
+  border-radius: 999px;
+}
+.voice-btn:active { background: oklch(100% 0 0 / 0.08); }
+.voice-btn.round { width: 34px; height: 34px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.voice-btn.muted { background: oklch(72% 0.19 40 / 0.25); }
+.voice-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--win);
+  padding-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.voice-count::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--win); animation: glowpulse 1.4s ease-in-out infinite alternate; }
+
 .toast {
   position: fixed;
   bottom: max(22px, env(safe-area-inset-bottom));

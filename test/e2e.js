@@ -362,6 +362,37 @@ async function main() {
     assert(lb.every(r => r.points === 2 && r.rank === 1), 'all-searchers-win yields a three-way tie at rank 1');
 
     T.forEach(c => c.close());
+
+    // --- voice chat signaling ---
+    const V1 = new Client('V1');
+    const V2 = new Client('V2');
+    await V1.connect();
+    await V2.connect();
+    V1.send({ t: 'hello', playerId: 'test_v1_' + Date.now(), name: 'Pia' });
+    V2.send({ t: 'hello', playerId: 'test_v2_' + Date.now(), name: 'Quin' });
+    const hv1 = await V1.waitFor('hello');
+    const hv2 = await V2.waitFor('hello');
+    assert(Array.isArray(hv1.config.iceServers) && hv1.config.iceServers.length > 0, 'hello ships ICE servers');
+    V1.send({ t: 'create' });
+    const vroom = await V1.waitFor('room');
+    V2.send({ t: 'join', code: vroom.code });
+    await V1.waitFor('room', m => m.players.length === 2);
+    V1.send({ t: 'voiceJoin' });
+    const vs1 = await V2.waitFor('voiceState', m => m.members.length === 1);
+    assert(vs1.members[0].name === 'Pia' && vs1.members[0].muted === false, 'voice join broadcast to the room');
+    V2.send({ t: 'voiceJoin' });
+    await V1.waitFor('voiceState', m => m.members.length === 2);
+    V1.send({ t: 'rtc', to: hv2.you.id, data: { sdp: { type: 'offer', sdp: 'x' } } });
+    const relay = await V2.waitFor('rtc');
+    assert(relay.from === hv1.you.id && relay.data.sdp.type === 'offer', 'rtc signaling relayed between voice members');
+    V1.send({ t: 'voiceMute', muted: true });
+    const vsMute = await V2.waitFor('voiceState', m => m.members.some(x => x.muted));
+    assert(vsMute.members.find(x => x.id === hv1.you.id).muted === true, 'mute state broadcast');
+    V2.send({ t: 'voiceLeave' });
+    const vsLeave = await V1.waitFor('voiceState', m => m.members.length === 1);
+    assert(vsLeave.members[0].id === hv1.you.id, 'voice leave removes member');
+    V1.close(); V2.close();
+
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {
     A.close(); B.close();
