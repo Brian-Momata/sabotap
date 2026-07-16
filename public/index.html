@@ -7,7 +7,11 @@
 <title>Sabotap</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sabotap">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -31,6 +35,15 @@
         <input type="text" id="codeInput" class="mono" placeholder="ROOM CODE" maxlength="8" autocomplete="off">
         <button class="chip-btn ghost" id="joinBtn" style="padding: 14px 20px;">Join</button>
       </div>
+    </div>
+
+    <div class="install-card" id="installCard" hidden>
+      <div style="flex: 1;">
+        <div class="install-title">Get the app</div>
+        <div class="install-sub" id="installSub">Install Sabotap for fullscreen play.</div>
+      </div>
+      <button class="chip-btn" id="installBtn">Install</button>
+      <button class="install-x" id="installDismiss" aria-label="Dismiss">✕</button>
     </div>
 
     <div class="section-label">Friends</div>
