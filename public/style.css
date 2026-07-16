@@ -192,6 +192,20 @@ input::placeholder { color: var(--text-3); }
 }
 .player-row .muted { color: var(--text-3); }
 
+.row-chip {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 3px 7px;
+  flex: none;
+}
+.row-chip.ready { color: var(--win); border-color: var(--win); }
+
+.btn.btn-ready, .btn.btn-ready:hover { background: var(--win); color: var(--on-win); }
+
 .setting-group { display: flex; gap: 8px; }
 .seg {
   flex: 1;

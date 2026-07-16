@@ -183,7 +183,10 @@ function renderLobby() {
     const row = document.createElement('div');
     row.className = 'player-row';
     if (p) {
-      row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span>${esc(p.name)}${seat === state.seat ? ' (you)' : ''}</span>`;
+      const chip = seat === 0
+        ? '<span class="row-chip">HOST</span>'
+        : (p.ready ? '<span class="row-chip ready">READY</span>' : '<span class="row-chip">NOT READY</span>');
+      row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${seat === state.seat ? ' (you)' : ''}</span>${chip}`;
     } else {
       row.innerHTML = '<span class="dot"></span><span class="muted">Waiting for opponent…</span>';
     }
@@ -198,8 +201,22 @@ function renderLobby() {
   const cur = diffs.find(d => d.key === r.settings.difficulty);
   $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse — faster fuse, faster puzzles, trickier digits.` : '';
   const full = r.players.length === 2;
-  $('startBtn').disabled = !full;
-  $('startBtn').textContent = full ? 'Start Match' : 'Waiting…';
+  const btn = $('startBtn');
+  btn.classList.remove('btn-ready');
+  if (isHost) {
+    const guest = r.players.find(x => x.seat === 1);
+    btn.disabled = !(full && guest && guest.ready);
+    btn.textContent = !full ? 'Waiting for opponent…' : (guest.ready ? 'Start Match' : 'Waiting for ready…');
+  } else {
+    const me = r.players.find(x => x.seat === state.seat);
+    btn.disabled = false;
+    if (me && me.ready) {
+      btn.textContent = 'Ready — host starts the match';
+      btn.classList.add('btn-ready');
+    } else {
+      btn.textContent = "I'm Ready";
+    }
+  }
 }
 
 function renderSegs(groupId, options, selected, enabled, onPick, label) {
@@ -721,7 +738,14 @@ $('shareBtn').onclick = async () => {
   }
 };
 
-$('startBtn').onclick = () => send({ t: 'start' });
+$('startBtn').onclick = () => {
+  if (state.seat === 0) {
+    send({ t: 'start' });
+  } else {
+    const me = state.room && state.room.players.find(x => x.seat === state.seat);
+    send({ t: 'ready', ready: !(me && me.ready) });
+  }
+};
 $('leaveBtn').onclick = () => send({ t: 'leave' });
 $('rematchBtn').onclick = () => {
   send({ t: 'rematch' });

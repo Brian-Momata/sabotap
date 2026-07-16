@@ -154,6 +154,17 @@ async function main() {
     const err = await B.waitFor('error');
     assert(/host/i.test(err.msg), 'non-host cannot change settings');
 
+    // --- ready gate: only the host starts, and only once the guest is ready ---
+    B.send({ t: 'start' });
+    const errGuest = await B.waitFor('error');
+    assert(/host/i.test(errGuest.msg), 'guest cannot start the match');
+    A.send({ t: 'start' });
+    const errNotReady = await A.waitFor('error');
+    assert(/ready/i.test(errNotReady.msg), 'host blocked until guest is ready');
+    B.send({ t: 'ready', ready: true });
+    const readyUpd = await A.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    assert(readyUpd.players.find(p => p.seat === 1).ready === true, 'guest ready state propagates');
+
     // --- round 1: searcher finds target ---
     A.send({ t: 'start' });
     const r1A = await A.waitFor('roundStart');

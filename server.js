@@ -137,6 +137,11 @@ wss.on('connection', ws => {
       if (room) room.start(room.seatOf(me.id));
     },
 
+    ready(msg) {
+      const room = roomFor(me.id);
+      if (room) room.setReady(room.seatOf(me.id), !!msg.ready);
+    },
+
     pick(msg) {
       const room = roomFor(me.id);
       if (room) room.onPick(room.seatOf(me.id), msg.index | 0);
