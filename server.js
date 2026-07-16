@@ -86,7 +86,11 @@ wss.on('connection', ws => {
         t: 'hello',
         you: { id: me.id, name: me.name, tag: me.tag },
         friends: social.friendsOf(id),
-        config: { name: CONFIG.name, roundsToWinOptions: CONFIG.roundsToWinOptions, fuseMsOptions: CONFIG.fuseMsOptions },
+        config: {
+          name: CONFIG.name,
+          roundsToWinOptions: CONFIG.roundsToWinOptions,
+          difficulties: Object.entries(CONFIG.difficulties).map(([key, d]) => ({ key, name: d.name, fuseMs: d.fuseMs })),
+        },
       });
       notifyPresence(id);
       // Re-attach to a live seat if this device was mid-game.

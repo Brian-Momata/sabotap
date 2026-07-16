@@ -16,7 +16,7 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 ## Play
 
 1. One player taps **Create Room**, shares the room code (or the invite link / a friend invite).
-2. The other joins; the host picks match length (first to 2/3/5) and fuse length (30/45/60s).
+2. The other joins; the host picks match length (first to 2/3/5) and difficulty — Casual (24s fuse), Tense (16s), or Frantic (10s). Higher difficulty also speeds up the Caller's puzzles and makes the odd digit a visual lookalike from the start.
 3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places — sometimes the target), **Zoom** (forces panning), **Invert**.
 4. Correct tap → Searcher takes the round. Fuse fills → Caller takes it.
 

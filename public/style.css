@@ -209,6 +209,24 @@ input::placeholder { color: var(--text-3); }
 .seg.sel { background: var(--accent-searcher); border-color: var(--accent-searcher); color: var(--on-searcher); }
 .seg:disabled { opacity: 0.55; cursor: default; }
 
+.diff-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 8px;
+  font-family: var(--mono);
+}
+
+.rules-card { padding: 14px 16px; }
+.rules-card p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.rules-card p:last-child { margin-bottom: 0; }
+.rules-card b.pink { color: var(--accent-searcher); font-weight: 700; }
+.rules-card b.cyan { color: var(--accent-caller); font-weight: 700; }
+
 /* ---------- game ---------- */
 
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }

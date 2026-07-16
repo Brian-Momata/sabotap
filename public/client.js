@@ -192,8 +192,11 @@ function renderLobby() {
   const isHost = state.seat === 0;
   renderSegs('roundsGroup', (state.config?.roundsToWinOptions) || [2, 3, 5], r.settings.roundsToWin, isHost,
     v => send({ t: 'settings', roundsToWin: v }), v => `${v} wins`);
-  renderSegs('fuseGroup', (state.config?.fuseMsOptions) || [30000, 45000, 60000], r.settings.fuseMs, isHost,
-    v => send({ t: 'settings', fuseMs: v }), v => `${v / 1000}s`);
+  const diffs = state.config?.difficulties || [];
+  renderSegs('diffGroup', diffs.map(d => d.key), r.settings.difficulty, isHost,
+    v => send({ t: 'settings', difficulty: v }), k => (diffs.find(d => d.key === k) || { name: k }).name);
+  const cur = diffs.find(d => d.key === r.settings.difficulty);
+  $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse — faster fuse, faster puzzles, trickier digits.` : '';
   const full = r.players.length === 2;
   $('startBtn').disabled = !full;
   $('startBtn').textContent = full ? 'Start Match' : 'Waiting…';

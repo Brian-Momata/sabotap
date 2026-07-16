@@ -147,6 +147,9 @@ async function main() {
     A.send({ t: 'settings', roundsToWin: 2 });
     const upd = await B.waitFor('room', m => m.settings.roundsToWin === 2);
     assert(upd.settings.roundsToWin === 2, 'host settings propagate');
+    A.send({ t: 'settings', difficulty: 'frantic' });
+    const updD = await B.waitFor('room', m => m.settings.difficulty === 'frantic');
+    assert(updD.settings.difficulty === 'frantic', 'difficulty setting propagates');
     B.send({ t: 'settings', roundsToWin: 5 });
     const err = await B.waitFor('error');
     assert(/host/i.test(err.msg), 'non-host cannot change settings');
