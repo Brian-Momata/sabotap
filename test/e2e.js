@@ -17,6 +17,7 @@ const ENV = {
   PUZZLE_TIME_MS: '1200',
   INTER_ROUND_MS: '300',
   RECONNECT_GRACE_MS: '3000',
+  PAIRING_DELAY_MS: '300',
   FUSE_TICK_MS: '100',
   STORE_FILE: path.join(os.tmpdir(), `sabotap-test-store-${Date.now()}.json`),
 };
@@ -257,9 +258,10 @@ async function main() {
     S2.send({ t: 'hello', playerId: searcherId, name: 'Rejoined' });
     await S2.waitFor('hello');
     const snap = await S2.waitFor('resume');
-    assert(snap.phase === 'live' && Array.isArray(snap.grid) && typeof snap.target === 'number', 'reconnect resumes live round with grid + target');
+    assert(snap.match && snap.match.phase === 'live' && Array.isArray(snap.match.grid) && typeof snap.match.target === 'number',
+      'reconnect resumes live round with grid + target');
     await callerR.waitFor('opponentStatus', m => m.connected === true);
-    const ti = snap.grid.indexOf(snap.target);
+    const ti = snap.match.grid.indexOf(snap.match.target);
     S2.send({ t: 'tap', index: ti });
     await S2.waitFor('roundEnd', m => m.reason === 'found');
     assert(true, 'resumed client can finish the round');
@@ -289,6 +291,77 @@ async function main() {
     assert(true, 'invitee joined via invite');
 
     C.close(); D.close(); S2.close();
+
+    // --- tournament: 3 players, round-robin with byes ---
+    const T = [new Client('T1'), new Client('T2'), new Client('T3')];
+    await Promise.all(T.map(c => c.connect()));
+    const names = ['Tia', 'Uma', 'Vic'];
+    T.forEach((c, i) => c.send({ t: 'hello', playerId: `test_t${i}_` + Date.now(), name: names[i] }));
+    await Promise.all(T.map(c => c.waitFor('hello')));
+    T[0].send({ t: 'create' });
+    const troom = await T[0].waitFor('room');
+    T[0].send({ t: 'settings', mode: 'tournament' });
+    await T[0].waitFor('room', m => m.settings.mode === 'tournament');
+    T[1].send({ t: 'join', code: troom.code });
+    T[2].send({ t: 'join', code: troom.code });
+    await T[0].waitFor('room', m => m.players.length === 3);
+    assert(true, 'three players join a tournament room');
+    T[0].send({ t: 'start' });
+    const errT = await T[0].waitFor('error');
+    assert(/ready/i.test(errT.msg), 'tournament blocked until everyone is ready');
+    T[1].send({ t: 'ready', ready: true });
+    T[2].send({ t: 'ready', ready: true });
+    await T[0].waitFor('room', m => m.players.filter(p => p.ready).length === 3);
+    T[0].send({ t: 'start' });
+
+    // circle method for 3: byes are seat 0, then 1, then 2
+    const byeOrder = [0, 1, 2];
+    const seenPairs = new Set();
+
+    async function playTournMatch(c1, c2) {
+      for (let r = 1; r <= 2; r++) {
+        const rs1 = await c1.waitFor('roundStart', m => m.round === r, 10000);
+        await c2.waitFor('roundStart', m => m.round === r, 10000);
+        const caller = rs1.role === 'caller' ? c1 : c2;
+        const searcher = caller === c1 ? c2 : c1;
+        caller.send({ t: 'pick', index: 0 });
+        const live = await searcher.waitFor('live');
+        await caller.waitFor('live');
+        searcher.send({ t: 'tap', index: live.grid.indexOf(live.target) });
+        await c1.waitFor('roundEnd', m => m.history.length === r);
+        await c2.waitFor('roundEnd', m => m.history.length === r);
+      }
+    }
+
+    for (let stage = 1; stage <= 3; stage++) {
+      const byeSeat = byeOrder[stage - 1];
+      const byeMsg = await T[byeSeat].waitFor('tWaiting', m => m.reason === 'bye' && m.stage === stage, 15000);
+      assert(byeMsg.stages === 3 && Array.isArray(byeMsg.standings), `stage ${stage}: bye player gets waiting screen with standings`);
+      const playing = [0, 1, 2].filter(s => s !== byeSeat);
+      const p1 = await T[playing[0]].waitFor('tPairing', m => m.stage === stage, 15000);
+      const p2 = await T[playing[1]].waitFor('tPairing', m => m.stage === stage, 15000);
+      assert(p1.opponent.name === names[playing[1]] && p2.opponent.name === names[playing[0]],
+        `stage ${stage}: pairings name the right opponents`);
+      assert(typeof p1.you.rank === 'number' && typeof p1.opponent.points === 'number',
+        `stage ${stage}: pairing carries rank and points`);
+      seenPairs.add(playing.slice().sort().join('-'));
+      await playTournMatch(T[playing[0]], T[playing[1]]);
+      if (stage < 3) {
+        await T[playing[0]].waitFor('tWaiting', m => m.reason === 'finished' && m.stage === stage, 10000);
+        await T[playing[1]].waitFor('tWaiting', m => m.reason === 'finished' && m.stage === stage, 10000);
+      }
+    }
+    assert(seenPairs.size === 3 && seenPairs.has('0-1') && seenPairs.has('0-2') && seenPairs.has('1-2'),
+      'everyone played everyone exactly once');
+
+    const tEnds = await Promise.all(T.map(c => c.waitFor('tEnd', () => true, 15000)));
+    const lb = tEnds[0].leaderboard;
+    assert(lb.length === 3, 'leaderboard lists all three players');
+    assert(lb.reduce((s, r) => s + r.points, 0) === 6, 'leaderboard points sum to total rounds played');
+    assert(lb.every(r => r.played === 2), 'everyone played two matches');
+    assert(lb.every(r => r.points === 2 && r.rank === 1), 'all-searchers-win yields a three-way tie at rank 1');
+
+    T.forEach(c => c.close());
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {
     A.close(); B.close();

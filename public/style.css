@@ -263,6 +263,29 @@ input::placeholder { color: var(--text-3); }
 .rules-card b.pink { color: var(--accent-searcher); font-weight: 700; }
 .rules-card b.cyan { color: var(--accent-caller); font-weight: 700; }
 
+/* ---------- tournament ---------- */
+
+.twait-stage { text-align: center; font-size: 13px; color: var(--text-2); margin-bottom: 6px; }
+.twait-count { font-size: 26px; font-weight: 700; color: var(--text-1); margin-top: 4px; min-height: 32px; }
+
+.standing-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: var(--bg-surface);
+  border-radius: 12px;
+  margin-bottom: 7px;
+  font-size: 14px;
+}
+.standing-row .rank { font-family: var(--mono); font-size: 13px; color: var(--text-3); width: 26px; flex: none; }
+.standing-row .sname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.standing-row .pts { font-family: var(--mono); font-size: 14px; font-weight: 700; }
+.standing-row .played { font-family: var(--mono); font-size: 11px; color: var(--text-3); width: 34px; text-align: right; flex: none; }
+.standing-row.you { outline: 1.5px solid var(--accent-searcher); outline-offset: -1.5px; }
+.standing-row.gone { opacity: 0.45; }
+.standing-row.first .rank, .standing-row.first .pts { color: var(--win); }
+
 /* ---------- game ---------- */
 
 .game-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }

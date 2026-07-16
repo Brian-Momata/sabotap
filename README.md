@@ -20,6 +20,10 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Each sabotage has its own cooldown, and none ever touches or highlights the target tile. Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places), **Zoom** (forces panning), **Invert**.
 4. Correct tap → Searcher takes the round. Fuse fills → Caller takes it.
 
+## Tournament mode
+
+Flip the lobby to **Tournament** (3–8 players, same room code / invites). It runs a circle-method **round-robin**: everyone plays everyone once, matches within a stage run simultaneously, and each match is exactly 2 rounds (both players search once) worth 1 point per round won. Between matches you see live standings and a worst-case countdown until the next pairing; pairings announce your opponent with their rank and points. Odd player counts get one bye each. Dropouts forfeit their current match (opponent takes the remaining rounds) and future opponents get walkovers. The final leaderboard crowns the winner; ties share a rank.
+
 ## Friends
 
 Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add friends by tag or from the results screen after a match; online friends can be invited to a room with one tap (they get an instant join prompt).

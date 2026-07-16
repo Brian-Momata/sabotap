@@ -18,6 +18,8 @@ const state = {
   friends: [],
   room: null,        // last room message
   seat: null,
+  matchSeat: 0,
+  mode: 'versus',
   role: null,
   phase: 'home',
   round: 0,
@@ -176,38 +178,59 @@ function inviteFriend(f) {
 function renderLobby() {
   const r = state.room;
   if (!r) return;
+  state.mode = r.settings.mode || 'versus';
   $('lobbyCode').textContent = r.code;
+  const isHost = state.seat === (r.host || 0);
+  const tourn = state.mode === 'tournament';
+  const maxP = r.maxPlayers || (tourn ? 8 : 2);
+  const minP = r.minPlayers || (tourn ? 3 : 2);
+
   const wrap = $('lobbyPlayers');
   wrap.innerHTML = '';
-  for (let seat = 0; seat < 2; seat++) {
-    const p = r.players.find(x => x.seat === seat);
+  for (const p of r.players) {
     const row = document.createElement('div');
     row.className = 'player-row';
-    if (p) {
-      const chip = seat === 0
-        ? '<span class="row-chip">HOST</span>'
-        : (p.ready ? '<span class="row-chip ready">READY</span>' : '<span class="row-chip">NOT READY</span>');
-      row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${seat === state.seat ? ' (you)' : ''}</span>${chip}`;
-    } else {
-      row.innerHTML = '<span class="dot"></span><span class="muted">Waiting for opponent…</span>';
-    }
+    const chip = p.seat === (r.host || 0)
+      ? '<span class="row-chip">HOST</span>'
+      : (p.ready ? '<span class="row-chip ready">READY</span>' : '<span class="row-chip">NOT READY</span>');
+    row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${p.seat === state.seat ? ' (you)' : ''}</span>${chip}`;
     wrap.append(row);
   }
-  const isHost = state.seat === 0;
-  renderSegs('roundsGroup', (state.config?.roundsToWinOptions) || [2, 3, 5], r.settings.roundsToWin, isHost,
-    v => send({ t: 'settings', roundsToWin: v }), v => `${v} wins`);
+  if (r.players.length < maxP) {
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    row.innerHTML = `<span class="dot"></span><span class="muted">Waiting for players… (${r.players.length}/${tourn ? maxP : 2})</span>`;
+    wrap.append(row);
+  }
+
+  renderSegs('modeGroup', ['versus', 'tournament'], state.mode, isHost,
+    v => send({ t: 'settings', mode: v }), k => (k === 'versus' ? '1 v 1' : 'Tournament'));
+  $('modeHint').textContent = tourn
+    ? `${minP}–${maxP} players · round-robin, everyone plays everyone · 2 rounds per match · most round wins takes it`
+    : '';
+
+  $('roundsLabel').hidden = tourn;
+  $('roundsGroup').hidden = tourn;
+  if (!tourn) {
+    renderSegs('roundsGroup', (state.config?.roundsToWinOptions) || [2, 3, 5], r.settings.roundsToWin, isHost,
+      v => send({ t: 'settings', roundsToWin: v }), v => `${v} wins`);
+  }
   const diffs = state.config?.difficulties || [];
   renderSegs('diffGroup', diffs.map(d => d.key), r.settings.difficulty, isHost,
     v => send({ t: 'settings', difficulty: v }), k => (diffs.find(d => d.key === k) || { name: k }).name);
   const cur = diffs.find(d => d.key === r.settings.difficulty);
   $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse — faster fuse, faster puzzles, trickier digits.` : '';
-  const full = r.players.length === 2;
+
   const btn = $('startBtn');
   btn.classList.remove('btn-ready');
   if (isHost) {
-    const guest = r.players.find(x => x.seat === 1);
-    btn.disabled = !(full && guest && guest.ready);
-    btn.textContent = !full ? 'Waiting for opponent…' : (guest.ready ? 'Start Match' : 'Waiting for ready…');
+    const others = r.players.filter(p => p.seat !== (r.host || 0));
+    const allReady = others.length && others.every(p => p.ready);
+    const enough = r.players.length >= minP && (tourn || r.players.length === 2);
+    btn.disabled = !(enough && allReady);
+    btn.textContent = !enough
+      ? `Waiting for players… (${r.players.length}/${minP})`
+      : (allReady ? (tourn ? 'Start Tournament' : 'Start Match') : 'Waiting for ready…');
   } else {
     const me = r.players.find(x => x.seat === state.seat);
     btn.disabled = false;
@@ -247,9 +270,10 @@ function setAccent(role) {
 }
 
 function renderHead() {
-  $('roleLabel').textContent = state.role === 'caller' ? 'CALLER' : 'SEARCHER';
+  const role = state.role === 'caller' ? 'CALLER' : 'SEARCHER';
+  $('roleLabel').textContent = state.opponentName ? `${role} · VS ${state.opponentName.toUpperCase()}` : role;
   const [a, b] = state.score;
-  const mine = state.seat === 0 ? `${a}–${b}` : `${b}–${a}`;
+  const mine = state.matchSeat === 0 ? `${a}–${b}` : `${b}–${a}`;
   $('scoreLabel').textContent = `R${state.round} · ${mine}`;
 }
 
@@ -297,7 +321,10 @@ function enterPickPhase(msg) {
   state.round = msg.round;
   state.score = msg.score;
   state.callerSeat = msg.callerSeat;
+  state.matchSeat = msg.you ?? state.seat;
+  state.opponentName = msg.opponent || null;
   state.role = msg.role;
+  $('pairOverlay').classList.remove('on');
   setAccent(msg.role);
   renderHead();
   renderFuse(0);
@@ -496,6 +523,49 @@ function handleSabotage(msg) {
   }
 }
 
+/* ---------- tournament ---------- */
+
+function startCountdown(el, ms, { prefix = '~', doneText = 'any moment…', seconds = false } = {}) {
+  clearInterval(el._cd);
+  const end = Date.now() + ms;
+  const tick = () => {
+    const left = end - Date.now();
+    if (left <= 0) {
+      el.textContent = doneText;
+      clearInterval(el._cd);
+      return;
+    }
+    const s = Math.ceil(left / 1000);
+    el.textContent = seconds
+      ? `${prefix}${s}…`
+      : `${prefix}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+  tick();
+  el._cd = setInterval(tick, 500);
+}
+
+function renderStandings(el, rows) {
+  el.innerHTML = '';
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'standing-row'
+      + (state.you && r.id === state.you.id ? ' you' : '')
+      + (r.active === false ? ' gone' : '')
+      + (r.rank === 1 ? ' first' : '');
+    row.innerHTML = `<span class="rank">#${r.rank}</span>`
+      + `<span class="sname">${esc(r.name)}${state.you && r.id === state.you.id ? ' (you)' : ''}${r.active === false ? ' · left' : ''}</span>`
+      + `<span class="played">${r.played}m</span>`
+      + `<span class="pts">${r.points} pt${r.points === 1 ? '' : 's'}</span>`;
+    el.append(row);
+  });
+}
+
+const TWAIT_STATUS = {
+  finished: 'Match done — waiting for the other matches to finish',
+  bye: 'You sit out this stage — back in the next pairing',
+  walkover: 'Walkover — your opponent left. Waiting for the other matches',
+};
+
 /* ---------- results ---------- */
 
 function renderResults(msg) {
@@ -660,7 +730,7 @@ const handlers = {
       if (msg.foundIndex >= 0 && cs[msg.foundIndex]) cs[msg.foundIndex].classList.add('correct');
       else if (cs[msg.targetIndex]) cs[msg.targetIndex].classList.add('reveal');
     }
-    const won = msg.winnerSeat === state.seat;
+    const won = msg.winnerSeat === state.matchSeat;
     $('roundOverlayEyebrow').textContent = msg.matchOver ? 'Match point' : `Round ${state.round}`;
     $('roundOverlayTitle').textContent = won ? 'Round yours' : 'Round lost';
     $('roundOverlayTitle').style.color = won ? 'var(--win)' : 'var(--danger)';
@@ -670,6 +740,58 @@ const handlers = {
     setTimeout(() => $('roundOverlay').classList.add('on'), msg.reason === 'found' ? 450 : 0);
     (won ? sfx.correct : sfx.wrong)();
     buzz(won ? [40, 40, 80] : [150]);
+  },
+
+  tPairing(msg) {
+    $('roundOverlay').classList.remove('on');
+    $('pairStage').textContent = `Stage ${msg.stage} of ${msg.stages}`;
+    $('pairVs').textContent = `You vs ${msg.opponent.name}`;
+    $('pairInfo').textContent = `You: #${msg.you.rank} · ${msg.you.points} pts   —   ${msg.opponent.name}: #${msg.opponent.rank} · ${msg.opponent.points} pts`;
+    startCountdown($('pairCount'), msg.startsInMs, { prefix: 'Starting in ', doneText: 'Starting…', seconds: true });
+    $('pairOverlay').classList.add('on');
+    sfx.charge();
+    buzz([40, 40, 40]);
+  },
+
+  tWaiting(msg) {
+    $('roundOverlay').classList.remove('on');
+    $('pairOverlay').classList.remove('on');
+    resetEffects();
+    $('twaitStage').textContent = `Stage ${msg.stage} / ${msg.stages}`;
+    $('twaitStatus').textContent = TWAIT_STATUS[msg.reason] || 'Waiting to pair…';
+    if (msg.estimateMs > 0) startCountdown($('twaitCount'), msg.estimateMs);
+    else $('twaitCount').textContent = 'any moment…';
+    renderStandings($('twaitStandings'), msg.standings);
+    show('s-twait');
+  },
+
+  tStandings(msg) {
+    if (!$('s-twait').classList.contains('on')) return;
+    $('twaitStage').textContent = `Stage ${msg.stage} / ${msg.stages}`;
+    if (msg.estimateMs > 0) startCountdown($('twaitCount'), msg.estimateMs);
+    else $('twaitCount').textContent = 'any moment…';
+    renderStandings($('twaitStandings'), msg.standings);
+  },
+
+  tEnd(msg) {
+    $('roundOverlay').classList.remove('on');
+    $('pairOverlay').classList.remove('on');
+    resetEffects();
+    const mine = msg.leaderboard.find(r => state.you && r.id === state.you.id);
+    const v = $('tendVerdict');
+    if (mine && mine.rank === 1) {
+      v.textContent = 'YOU WIN THE TOURNAMENT';
+      v.className = 'verdict win';
+      sfx.win();
+      buzz([40, 30, 40, 30, 160]);
+    } else {
+      v.textContent = mine ? `#${mine.rank} PLACE` : 'TOURNAMENT OVER';
+      v.className = 'verdict';
+      sfx.lose();
+    }
+    $('tendPoints').textContent = mine ? `${mine.points} pts` : '';
+    renderStandings($('tendBoard'), msg.leaderboard);
+    show('s-tend');
   },
 
   matchEnd(msg) {
@@ -688,34 +810,47 @@ const handlers = {
   },
 
   resume(msg) {
-    state.room = { code: msg.code, players: msg.players, settings: msg.settings, phase: msg.phase };
+    state.room = msg;
     state.seat = msg.you;
-    state.round = msg.round;
-    state.score = msg.score;
-    state.callerSeat = msg.callerSeat;
-    state.role = msg.role;
-    state.gridCols = msg.gridCols;
-    state.maxCharges = msg.maxCharges;
-    state.sabotages = msg.sabotages;
+    state.mode = msg.settings ? (msg.settings.mode || 'versus') : 'versus';
     $('pauseOverlay').classList.remove('on');
-    if (msg.phase === 'lobby') {
+    $('pairOverlay').classList.remove('on');
+    $('roundOverlay').classList.remove('on');
+    if (msg.match) {
+      const s = msg.match;
+      state.matchSeat = s.you;
+      state.round = s.round;
+      state.score = s.score;
+      state.callerSeat = s.callerSeat;
+      state.role = s.role;
+      state.opponentName = s.opponent || null;
+      state.gridCols = s.gridCols;
+      state.maxCharges = s.maxCharges;
+      state.sabotages = s.sabotages;
+      if (s.phase === 'pick') {
+        enterPickPhase(s);
+      } else if (s.phase === 'live') {
+        setAccent(s.role);
+        renderHead();
+        show('s-game');
+        resetEffects();
+        state.cooldowns = {};
+        enterLivePhase(s);
+        renderFuse(s.fuse);
+      } else {
+        // roundEnd: the next roundStart / stage message arrives within seconds
+        setAccent(s.role);
+        renderHead();
+        show('s-game');
+        resetEffects();
+      }
+    } else if (msg.phase === 'lobby' || msg.phase === 'matchEnd' || msg.phase === 'tEnd') {
+      // matchEnd / tEnd screens arrive as separate follow-up messages
       state.phase = 'lobby';
       renderLobby();
       show('s-lobby');
-    } else if (msg.phase === 'pick') {
-      enterPickPhase(msg);
-    } else if (msg.phase === 'live') {
-      setAccent(msg.role);
-      renderHead();
-      $('roundOverlay').classList.remove('on');
-      show('s-game');
-      resetEffects();
-      enterLivePhase(msg);
-      renderFuse(msg.fuse);
-    } else if (msg.phase === 'matchEnd') {
-      renderResults({ ...msg, winnerSeat: msg.score[0] > msg.score[1] ? 0 : 1, players: msg.players });
     }
-    // roundEnd: the next roundStart/matchEnd arrives within seconds; show game shell
+    // phase 'playing' without a match: a tWaiting follow-up is on its way
   },
 
   toast(msg) {
@@ -770,7 +905,7 @@ $('shareBtn').onclick = async () => {
 };
 
 $('startBtn').onclick = () => {
-  if (state.seat === 0) {
+  if (state.room && state.seat === (state.room.host || 0)) {
     send({ t: 'start' });
   } else {
     const me = state.room && state.room.players.find(x => x.seat === state.seat);
@@ -798,6 +933,11 @@ $('addFriendResultBtn').onclick = () => {
   send({ t: 'friendAdd', tag: opp.tag || '' });
 };
 $('inviteDeclineBtn').onclick = () => $('inviteOverlay').classList.remove('on');
+$('tendLobbyBtn').onclick = () => {
+  renderLobby();
+  show('s-lobby');
+  state.phase = 'lobby';
+};
 
 function renderPrefButtons() {
   $('soundToggle').textContent = `Sound: ${prefs.sound ? 'on' : 'off'}`;

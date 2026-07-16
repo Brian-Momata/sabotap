@@ -70,7 +70,11 @@
 
     <div id="lobbyPlayers"></div>
 
-    <div class="section-label">First to</div>
+    <div class="section-label">Mode</div>
+    <div class="setting-group" id="modeGroup"></div>
+    <div class="diff-hint" id="modeHint"></div>
+
+    <div class="section-label" id="roundsLabel">First to</div>
     <div class="setting-group" id="roundsGroup"></div>
     <div class="section-label">Difficulty</div>
     <div class="setting-group" id="diffGroup"></div>
@@ -132,6 +136,31 @@
     </div>
   </section>
 
+  <!-- TOURNAMENT: WAITING / STANDINGS -->
+  <section id="s-twait" class="screen">
+    <div class="eyebrow" style="text-align: center; margin: 10px 0 4px;">Tournament</div>
+    <div class="twait-stage mono" id="twaitStage">Stage 1 / 3</div>
+    <div class="wait-box" style="flex: 0 0 auto; padding: 30px 0 22px;">
+      <div class="pulse-dot"></div>
+      <div id="twaitStatus">Waiting to pair…</div>
+      <div class="twait-count mono" id="twaitCount"></div>
+    </div>
+    <div class="section-label">Standings</div>
+    <div id="twaitStandings"></div>
+  </section>
+
+  <!-- TOURNAMENT: FINAL LEADERBOARD -->
+  <section id="s-tend" class="screen results">
+    <div class="eyebrow" style="margin: 18px 0 26px;">Tournament Complete</div>
+    <div class="verdict" id="tendVerdict">YOU WIN</div>
+    <div class="final-score" id="tendPoints" style="font-size: 38px; margin-bottom: 26px;">7 pts</div>
+    <div class="section-label" style="align-self: stretch; text-align: left;">Final standings</div>
+    <div id="tendBoard" style="width: 100%;"></div>
+    <div class="stack" style="margin-top: auto; padding-top: 18px;">
+      <button class="btn btn-primary" id="tendLobbyBtn">Back to Lobby</button>
+    </div>
+  </section>
+
   <!-- RESULTS -->
   <section id="s-results" class="screen results">
     <div class="eyebrow" style="margin: 18px 0 34px;">Match Complete</div>
@@ -151,6 +180,14 @@
 <!-- sabotage feedback -->
 <div class="edge-glow" id="edgeGlow"></div>
 <div class="sab-banner" id="sabBanner"></div>
+
+<!-- tournament pairing overlay -->
+<div class="overlay" id="pairOverlay">
+  <div class="eyebrow" id="pairStage">Stage 1 of 3</div>
+  <div class="big" id="pairVs">You vs Bob</div>
+  <div class="sub" id="pairInfo"></div>
+  <div class="twait-count mono" id="pairCount"></div>
+</div>
 
 <!-- round end overlay -->
 <div class="overlay" id="roundOverlay">
