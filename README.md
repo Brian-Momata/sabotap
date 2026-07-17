@@ -39,12 +39,13 @@ Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add
 - `lib/game/` — the game domain, one responsibility per module:
   - `match.js` — the 2-player round engine (pick → live → roundEnd), transport-agnostic via injected send ports.
   - `sabotages.js` — one effect function per sabotage kind; adding a kind means a config entry + one function here, `Match` stays untouched.
+  - `boards.js` — board themes ("maps"): per-board grid/puzzle strategies (Hall of Mirrors twins, Glyphs symbols) and the Rotation cycle; Blackout and Drift are client-visual only.
   - `puzzle.js`, `grid.js`, `round-robin.js`, `room-code.js`, `rng.js` — pure helpers.
   - `tournament.js` — round-robin schedule, stages, standings, walkovers/forfeits.
   - `voice-channel.js` — voice roster + WebRTC signaling relay, scoped by a room-supplied group function.
   - `room.js` — roster, lobby settings, mode dispatch (versus vs tournament), reconnect grace.
   - `index.js` — the package's public surface (`Room`, `Match`, …).
-- `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `lobby`, `game-view` (grid/fuse/caller panel/sabotage effects), `tournament-view`, `results`, `voice` (WebRTC mesh), `install` (PWA prompt), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
+- `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `lobby`, `game-view` (grid/fuse/caller panel), `sabotage-fx` (searcher-side sabotage visuals), `board-themes` (board picker motifs, announce splash, Blackout torch, Drift motion), `tournament-view`, `results`, `voice` (WebRTC mesh), `install` (PWA prompt), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
 - Engineering standard: [docs/ENGINEERING.md](docs/ENGINEERING.md) — hard rules, style, and definition of done for every change.
 - `data/store.json` — profiles and friendships (atomic JSON writes). Rooms are in-memory.
 - Reconnect grace: a dropped player has 30s to rejoin their seat; the round pauses meanwhile.

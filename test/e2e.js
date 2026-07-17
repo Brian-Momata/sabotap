@@ -136,6 +136,8 @@ async function main() {
     const helloA = await A.waitFor('hello');
     const helloB = await B.waitFor('hello');
     assert(/^ANN#\d{4}$/.test(helloA.you.tag), 'Ann gets a friend tag');
+    assert(Array.isArray(helloA.config.boards) && helloA.config.boards.some(b => b.key === 'glyphs'),
+      'hello config lists board themes');
     const aId = helloA.you.id, bId = helloB.you.id;
 
     // --- room create/join + settings ---
@@ -260,6 +262,7 @@ async function main() {
     const snap = await S2.waitFor('resume');
     assert(snap.match && snap.match.phase === 'live' && Array.isArray(snap.match.grid) && typeof snap.match.target === 'number',
       'reconnect resumes live round with grid + target');
+    assert(snap.match.board && snap.match.board.key === 'standard', 'snapshot carries the round board');
     await callerR.waitFor('opponentStatus', m => m.connected === true);
     const ti = snap.match.grid.indexOf(snap.match.target);
     S2.send({ t: 'tap', index: ti });
@@ -429,6 +432,90 @@ async function main() {
     const relayed = await U[1].waitFor('rtc');
     assert(relayed.from === uid[2] && relayed.data.sdp.sdp === 'paired', 'rtc relay only flows inside your voice group');
     U.forEach(c => c.close());
+
+    // --- board themes: glyphs round end-to-end ---
+    const G = new Client('G');
+    const H = new Client('H');
+    await G.connect();
+    await H.connect();
+    G.send({ t: 'hello', playerId: 'test_g_' + Date.now(), name: 'Gia' });
+    H.send({ t: 'hello', playerId: 'test_h_' + Date.now(), name: 'Hal' });
+    await G.waitFor('hello');
+    await H.waitFor('hello');
+    G.send({ t: 'create' });
+    const groom = await G.waitFor('room');
+    H.send({ t: 'join', code: groom.code });
+    await G.waitFor('room', m => m.players.length === 2);
+    G.send({ t: 'settings', board: 'glyphs' });
+    const gset = await H.waitFor('room', m => m.settings.board === 'glyphs');
+    assert(gset.settings.board === 'glyphs', 'board setting propagates to the room');
+    H.drain('room');
+    G.send({ t: 'settings', board: 'colossus' });
+    const gbad = await H.waitFor('room');
+    assert(gbad.settings.board === 'glyphs', 'unknown board key is ignored');
+    H.send({ t: 'ready', ready: true });
+    await G.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    G.send({ t: 'start' });
+    const grsG = await G.waitFor('roundStart');
+    const grsH = await H.waitFor('roundStart');
+    assert(grsG.board && grsG.board.key === 'glyphs' && grsG.board.name === 'Glyphs',
+      'roundStart announces the glyphs board');
+    const gCaller = grsG.callerSeat === 0 ? G : H; // G created the room, so G is seat 0
+    const gSearcher = gCaller === G ? H : G;
+    const pickGrid = (gCaller === G ? grsG : grsH).grid;
+    assert(pickGrid.length === 56 && new Set(pickGrid).size === 56 && pickGrid.every(v => typeof v === 'string' && isNaN(Number(v))),
+      'glyphs grid is 56 unique symbols');
+    gCaller.send({ t: 'pick', index: 7 });
+    const gliveS = await gSearcher.waitFor('live');
+    await gCaller.waitFor('live');
+    assert(typeof gliveS.target === 'string' && gliveS.grid.includes(gliveS.target), 'glyph target is a symbol on the grid');
+    gCaller.drain('puzzle');
+    const gpz = await gCaller.waitFor('puzzle');
+    assert(gpz.tiles.length === 5 && gpz.tiles.every(v => typeof v === 'string'), 'caller puzzle is glyph odd-one-out');
+    gCaller.send({ t: 'puzzle', id: gpz.id, index: oddIndex(gpz.tiles) });
+    await gCaller.waitFor('charges', m => m.n === 1, 4000);
+    assert(true, 'glyph puzzle solve banks a charge');
+    gSearcher.send({ t: 'tap', index: gliveS.grid.indexOf(gliveS.target) });
+    const gend = await gSearcher.waitFor('roundEnd');
+    assert(gend.reason === 'found' && gend.target === gliveS.target, 'glyph round resolves on the tapped symbol');
+    G.close(); H.close();
+
+    // --- board themes: rotation cycles boards round by round ---
+    const R1 = new Client('R1');
+    const R2 = new Client('R2');
+    await R1.connect();
+    await R2.connect();
+    R1.send({ t: 'hello', playerId: 'test_r1_' + Date.now(), name: 'Rex' });
+    R2.send({ t: 'hello', playerId: 'test_r2_' + Date.now(), name: 'Sky' });
+    await R1.waitFor('hello');
+    await R2.waitFor('hello');
+    R1.send({ t: 'create' });
+    const rroom = await R1.waitFor('room');
+    R2.send({ t: 'join', code: rroom.code });
+    await R1.waitFor('room', m => m.players.length === 2);
+    R1.send({ t: 'settings', board: 'rotation', roundsToWin: 2 });
+    await R2.waitFor('room', m => m.settings.board === 'rotation');
+    R2.send({ t: 'ready', ready: true });
+    await R1.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    R1.send({ t: 'start' });
+    const rot1 = await R1.waitFor('roundStart', m => m.round === 1);
+    await R2.waitFor('roundStart', m => m.round === 1);
+    assert(rot1.board.key === 'standard', 'rotation round 1 plays the standard board');
+    const rCaller1 = rot1.callerSeat === 0 ? R1 : R2;
+    const rSearcher1 = rCaller1 === R1 ? R2 : R1;
+    rCaller1.send({ t: 'pick', index: 0 });
+    const rlive1 = await rSearcher1.waitFor('live');
+    await rCaller1.waitFor('live');
+    rSearcher1.send({ t: 'tap', index: rlive1.grid.indexOf(rlive1.target) });
+    await R1.waitFor('roundEnd');
+    await R2.waitFor('roundEnd');
+    const rot2a = await R1.waitFor('roundStart', m => m.round === 2, 5000);
+    const rot2b = await R2.waitFor('roundStart', m => m.round === 2, 5000);
+    assert(rot2a.board.key === 'mirrors', 'rotation round 2 advances to hall of mirrors');
+    const mirrorsGrid2 = (rot2a.role === 'caller' ? rot2a : rot2b).grid;
+    assert(mirrorsGrid2.length === 56 && new Set(mirrorsGrid2).size === 56 && mirrorsGrid2.every(v => typeof v === 'number'),
+      'mirrors grid stays 56 unique numbers');
+    R1.close(); R2.close();
 
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {

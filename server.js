@@ -8,7 +8,7 @@ const { WebSocketServer } = require('ws');
 const CONFIG = require('./lib/config');
 const Store = require('./lib/store');
 const Social = require('./lib/social');
-const { Room, makeRoomCode } = require('./lib/game');
+const { Room, makeRoomCode, boardList } = require('./lib/game');
 
 const store = new Store(process.env.STORE_FILE || path.join(__dirname, 'data', 'store.json'));
 const social = new Social(store);
@@ -102,6 +102,7 @@ wss.on('connection', ws => {
           name: CONFIG.name,
           roundsToWinOptions: CONFIG.roundsToWinOptions,
           difficulties: Object.entries(CONFIG.difficulties).map(([key, d]) => ({ key, name: d.name, fuseMs: d.fuseMs })),
+          boards: boardList(),
           iceServers: iceServers(),
         },
       });

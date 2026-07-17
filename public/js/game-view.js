@@ -1,9 +1,12 @@
-/* Game screen: grid, fuse, caller panel, and sabotage effects. */
+/* Game screen: grid, fuse, and the caller panel. Sabotage visuals live in
+   sabotage-fx.js; board theming in board-themes.js. */
 
 import { $, state, esc } from './state.js';
 import { send } from './net.js';
-import { sfx, buzz } from './audio.js';
+import { sfx } from './audio.js';
 import { show } from './ui.js';
+import { boardRoundStart, armBoardFx, driftRowStyle } from './board-themes.js';
+import { resetEffects } from './sabotage-fx.js';
 
 /* ---------- layout & head ---------- */
 
@@ -29,12 +32,23 @@ export function renderFuse(v) {
   $('fuseName').textContent = v >= 0.8 ? 'FUSE — CRITICAL' : 'FUSE';
 }
 
-function buildGrid(values, tappable) {
+// Drift builds row containers (so each row can move as one unit) while every
+// other board keeps the flat CSS grid; state.cellEls preserves index order
+// either way, so taps and sabotage effects are layout-agnostic.
+function buildGrid(values, tappable, drift = false) {
   state.grid = [...values];
   const grid = $('grid');
-  grid.style.gridTemplateColumns = `repeat(${state.gridCols}, 1fr)`;
   grid.innerHTML = '';
+  grid.classList.toggle('drifting', drift);
+  grid.style.gridTemplateColumns = drift ? '' : `repeat(${state.gridCols}, 1fr)`;
+  state.cellEls = [];
+  let rowEl = null;
   values.forEach((v, i) => {
+    if (drift && i % state.gridCols === 0) {
+      rowEl = document.createElement('div');
+      driftRowStyle(rowEl, Math.floor(i / state.gridCols), state.board || {});
+      grid.append(rowEl);
+    }
     const cell = document.createElement('div');
     cell.className = 'cell';
     cell.textContent = v;
@@ -44,12 +58,13 @@ function buildGrid(values, tappable) {
         send({ t: state.phase === 'pick' ? 'pick' : 'tap', index: i });
       };
     }
-    grid.append(cell);
+    (drift ? rowEl : grid).append(cell);
+    state.cellEls.push(cell);
   });
 }
 
 export function cells() {
-  return $('grid').children;
+  return state.cellEls || [];
 }
 
 function showGamePanels({ grid, wait, caller }) {
@@ -77,6 +92,8 @@ export function enterPickPhase(msg) {
   show('s-game');
   resetEffects();
   state.cooldowns = {};
+  state.board = msg.board || state.board || null;
+  boardRoundStart(state.board, msg.round);
   if (msg.role === 'caller') {
     state.gridCols = msg.gridCols;
     $('findLbl').textContent = 'PICK THE TARGET';
@@ -100,8 +117,9 @@ export function enterLivePhase(msg) {
   $('findNum').textContent = msg.target;
   if (state.role === 'searcher') {
     state.gridCols = msg.gridCols;
-    buildGrid(msg.grid, true);
+    buildGrid(msg.grid, true, state.board && state.board.key === 'drift');
     showGamePanels({ grid: true, wait: false, caller: false });
+    armBoardFx(state.board);
   } else {
     state.charges = msg.charges || 0;
     renderCharges();
@@ -114,6 +132,7 @@ export function enterLivePhase(msg) {
 // Rebuild the game screen after a reconnect, from a server match snapshot.
 export function resumeMatch(s) {
   state.matchSeat = s.you;
+  state.board = s.board || null;
   state.round = s.round;
   state.score = s.score;
   state.callerSeat = s.callerSeat;
@@ -130,6 +149,7 @@ export function resumeMatch(s) {
     show('s-game');
     resetEffects();
     state.cooldowns = {};
+    boardRoundStart(s.board, s.round);
     enterLivePhase(s);
     renderFuse(s.fuse);
   } else {
@@ -206,94 +226,3 @@ export function updateSabButtons() {
   });
 }
 setInterval(updateSabButtons, 250);
-
-/* ---------- sabotage effects (searcher) ---------- */
-
-const SAB_ICON = { blur: '🌫', decoys: '✨', swap: '⚡', zoom: '🔍', invert: '🌗' };
-let effectTimers = [];
-
-export function resetEffects() {
-  effectTimers.forEach(clearTimeout);
-  effectTimers = [];
-  $('gridOuter').classList.remove('blurred', 'inverted', 'zoomed');
-  $('edgeGlow').classList.remove('on');
-  $('sabBanner').classList.remove('on');
-}
-
-function flashFeedback(kind, name, detail) {
-  // Unmissable: banner + edge glow the instant it lands (design variant C).
-  const pink = kind === 'swap';
-  const glow = $('edgeGlow');
-  glow.style.setProperty('--glow', pink ? 'var(--accent-searcher)' : 'var(--accent-caller)');
-  glow.classList.remove('on');
-  void glow.offsetWidth;
-  glow.classList.add('on');
-  const banner = $('sabBanner');
-  banner.style.setProperty('--banner-bg', pink ? 'var(--accent-searcher)' : 'var(--accent-caller)');
-  banner.style.setProperty('--banner-fg', pink ? 'var(--on-searcher)' : 'var(--on-caller)');
-  banner.textContent = `${SAB_ICON[kind] || '⚡'} ${name.toUpperCase()} — ${detail}`;
-  banner.classList.add('on');
-  effectTimers.push(setTimeout(() => banner.classList.remove('on'), 1600));
-  sfx.sabotage();
-  buzz([60, 40, 60]);
-}
-
-export function applySwap(a, b) {
-  const cs = cells();
-  const ca = cs[a], cb = cs[b];
-  if (!ca || !cb) return;
-  const ra = ca.getBoundingClientRect();
-  const rb = cb.getBoundingClientRect();
-  ca.style.transform = `translate(${rb.left - ra.left}px, ${rb.top - ra.top}px)`;
-  cb.style.transform = `translate(${ra.left - rb.left}px, ${ra.top - rb.top}px)`;
-  ca.style.zIndex = cb.style.zIndex = 2;
-  effectTimers.push(setTimeout(() => {
-    ca.style.transition = cb.style.transition = 'none';
-    ca.style.transform = cb.style.transform = '';
-    ca.style.zIndex = cb.style.zIndex = '';
-    const tmp = state.grid[a];
-    state.grid[a] = state.grid[b];
-    state.grid[b] = tmp;
-    ca.textContent = state.grid[a];
-    cb.textContent = state.grid[b];
-    void ca.offsetWidth;
-    ca.style.transition = cb.style.transition = '';
-  }, 380));
-}
-
-export function handleSabotage(msg) {
-  const spec = state.sabotages.find(s => s.kind === msg.kind) || { name: msg.name, detail: '' };
-  flashFeedback(msg.kind, msg.name, spec.detail || '');
-  const outer = $('gridOuter');
-  if (msg.kind === 'blur') {
-    outer.classList.add('blurred');
-    effectTimers.push(setTimeout(() => outer.classList.remove('blurred'), msg.durationMs));
-  } else if (msg.kind === 'invert') {
-    outer.classList.add('inverted');
-    effectTimers.push(setTimeout(() => outer.classList.remove('inverted'), msg.durationMs));
-  } else if (msg.kind === 'zoom') {
-    outer.classList.add('zoomed');
-    // Pan to the quadrant the server chose (the far side from the target).
-    const pan = () => {
-      if (msg.focus) {
-        outer.scrollLeft = msg.focus.x ? outer.scrollWidth - outer.clientWidth : 0;
-        outer.scrollTop = msg.focus.y ? outer.scrollHeight - outer.clientHeight : 0;
-      }
-    };
-    effectTimers.push(setTimeout(pan, 60));
-    effectTimers.push(setTimeout(pan, 380));
-    effectTimers.push(setTimeout(() => {
-      outer.classList.remove('zoomed');
-      outer.scrollLeft = 0;
-      outer.scrollTop = 0;
-    }, msg.durationMs));
-  } else if (msg.kind === 'decoys') {
-    const cs = cells();
-    msg.indices.forEach(i => cs[i] && cs[i].classList.add('decoy'));
-    effectTimers.push(setTimeout(() => {
-      msg.indices.forEach(i => cs[i] && cs[i].classList.remove('decoy'));
-    }, msg.durationMs));
-  } else if (msg.kind === 'swap') {
-    applySwap(msg.a, msg.b);
-  }
-}

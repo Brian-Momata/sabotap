@@ -8,8 +8,9 @@ import { renderYou, renderFriends } from './home.js';
 import { renderLobby } from './lobby.js';
 import {
   enterPickPhase, enterLivePhase, resumeMatch, renderFuse, renderPuzzle,
-  renderCharges, updateSabButtons, cells, handleSabotage, applySwap, resetEffects,
+  renderCharges, updateSabButtons, cells,
 } from './game-view.js';
+import { handleSabotage, applySwap, resetEffects } from './sabotage-fx.js';
 import { startCountdown, renderStandings, TWAIT_STATUS } from './tournament-view.js';
 import { renderResults } from './results.js';
 import { voice, voiceAllowed, voicePeer, syncVoicePeers, leaveVoice, renderVoiceDock } from './voice.js';

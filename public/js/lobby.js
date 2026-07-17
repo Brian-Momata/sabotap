@@ -3,6 +3,7 @@
 import { $, state, esc } from './state.js';
 import { send } from './net.js';
 import { voice } from './voice.js';
+import { BOARD_MOTIF } from './board-themes.js';
 
 export function renderLobby() {
   const r = state.room;
@@ -50,6 +51,8 @@ export function renderLobby() {
   const cur = diffs.find(d => d.key === r.settings.difficulty);
   $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse — faster fuse, faster puzzles, trickier digits.` : '';
 
+  renderBoards(r, isHost);
+
   const btn = $('startBtn');
   btn.classList.remove('btn-ready');
   if (isHost) {
@@ -69,6 +72,35 @@ export function renderLobby() {
     } else {
       btn.textContent = "I'm Ready";
     }
+  }
+}
+
+// Host picks from motif cards; everyone else sees the current pick read-only.
+function renderBoards(r, isHost) {
+  const boards = state.config?.boards || [];
+  const selected = r.settings.board || 'standard';
+  const wrap = $('boardGroup');
+  wrap.innerHTML = '';
+  $('boardLabel').textContent = isHost ? 'Board' : 'Board — set by host';
+  if (!boards.length) return;
+  if (isHost) {
+    wrap.className = 'board-grid';
+    for (const b of boards) {
+      const card = document.createElement('button');
+      card.className = 'board-card' + (b.key === selected ? ' sel' : '');
+      card.innerHTML = `<span class="board-motif">${BOARD_MOTIF[b.key] || '■'}</span>`
+        + `<span class="board-name">${esc(b.name)}</span><span class="board-tag">${esc(b.tagline)}</span>`;
+      card.onclick = () => send({ t: 'settings', board: b.key });
+      wrap.append(card);
+    }
+  } else {
+    wrap.className = '';
+    const b = boards.find(x => x.key === selected) || boards[0];
+    const row = document.createElement('div');
+    row.className = 'board-readonly';
+    row.innerHTML = `<span class="board-motif">${BOARD_MOTIF[b.key] || '■'}</span>`
+      + `<span><span class="board-name">${esc(b.name)}</span><span class="board-tag">${esc(b.tagline)}</span></span>`;
+    wrap.append(row);
   }
 }
 
