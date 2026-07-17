@@ -36,7 +36,16 @@ Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add
 
 - `server.js` + `lib/` — Node + Express + `ws`. Fully server-authoritative: grid, target, fuse, puzzles, charges, and sabotage resolution live on the server; clients send intents and render.
 - `lib/config.js` — every playtesting variable (grid size, fuse, puzzle time, sabotage tuning) in one block; numeric values overridable via env vars.
-- `public/` — vanilla JS single-page client + PWA manifest/service worker. Design tokens are oklch CSS custom properties from the design system.
+- `lib/game/` — the game domain, one responsibility per module:
+  - `match.js` — the 2-player round engine (pick → live → roundEnd), transport-agnostic via injected send ports.
+  - `sabotages.js` — one effect function per sabotage kind; adding a kind means a config entry + one function here, `Match` stays untouched.
+  - `puzzle.js`, `grid.js`, `round-robin.js`, `room-code.js`, `rng.js` — pure helpers.
+  - `tournament.js` — round-robin schedule, stages, standings, walkovers/forfeits.
+  - `voice-channel.js` — voice roster + WebRTC signaling relay, scoped by a room-supplied group function.
+  - `room.js` — roster, lobby settings, mode dispatch (versus vs tournament), reconnect grace.
+  - `index.js` — the package's public surface (`Room`, `Match`, …).
+- `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `lobby`, `game-view` (grid/fuse/caller panel/sabotage effects), `tournament-view`, `results`, `voice` (WebRTC mesh), `install` (PWA prompt), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
+- Engineering standard: [docs/ENGINEERING.md](docs/ENGINEERING.md) — hard rules, style, and definition of done for every change.
 - `data/store.json` — profiles and friendships (atomic JSON writes). Rooms are in-memory.
 - Reconnect grace: a dropped player has 30s to rejoin their seat; the round pauses meanwhile.
 

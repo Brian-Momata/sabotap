@@ -1,3 +1,13 @@
 node_modules/
 data/
 *.log
+
+# Session/agent docs kept local
+CLAUDE.md
+docs/ENGINEERING.md
+
+# Local editor/agent settings & OS cruft
+.claude/settings.local.json
+.env
+.env.*
+.DS_Store

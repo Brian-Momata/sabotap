@@ -1,7 +1,14 @@
 'use strict';
 
-const CACHE = 'sabotap-v2';
-const SHELL = ['/', '/index.html', '/style.css', '/client.js', '/manifest.webmanifest', '/icons/icon.svg'];
+const CACHE = 'sabotap-v3';
+const SHELL = [
+  '/', '/index.html', '/style.css', '/manifest.webmanifest', '/icons/icon.svg',
+  // Keep this list in sync with public/js/ — every module must be precached
+  // or an installed PWA breaks offline after the next deploy.
+  '/js/main.js', '/js/state.js', '/js/net.js', '/js/audio.js', '/js/ui.js',
+  '/js/home.js', '/js/lobby.js', '/js/game-view.js', '/js/tournament-view.js',
+  '/js/results.js', '/js/voice.js', '/js/install.js', '/js/handlers.js',
+];
 
 self.addEventListener('install', e => {
   // Cache shell files individually and tolerate failures (e.g. requests that
