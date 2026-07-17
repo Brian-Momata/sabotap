@@ -69,12 +69,16 @@ $('rematchBtn').onclick = () => {
   $('rematchBtn').textContent = 'Waiting for opponent…';
 };
 $('backHomeBtn').onclick = () => {
-  // Return to the shared room lobby (keeps the same code for another match).
+  // Return to the shared room lobby (keeps the same code for another match);
+  // home only if the room dissolved while we sat on the results screen.
   if (state.room) {
-    send({ t: 'leave' });
+    renderLobby();
+    show('s-lobby');
+    state.phase = 'lobby';
+  } else {
+    show('s-home');
+    state.phase = 'home';
   }
-  show('s-home');
-  state.phase = 'home';
 };
 $('addFriendResultBtn').onclick = () => {
   const opp = state.opponent;
