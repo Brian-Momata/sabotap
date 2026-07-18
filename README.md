@@ -22,7 +22,7 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 
 ## Voice chat
 
-Every room has built-in voice chat — tap the 🎙 pill (bottom-right) to join; everyone in the room who joins can talk, across the lobby, matches, and tournament waits. Audio is peer-to-peer WebRTC (the game server only relays call setup), with mute and leave controls. If two players are on very restrictive networks the call may not connect — set `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` env vars to add a TURN relay for those cases.
+Every room has built-in voice chat — tap the 🎙 pill (bottom-right) to join; everyone in the room who joins can talk, across the lobby, matches, and tournament waits. Audio is peer-to-peer WebRTC (the game server only relays call setup), with mute and leave controls. Whoever is talking lights up: their lobby mic badge glows and the voice pill shows their name, so a room full of people always knows who has the floor. If two players are on very restrictive networks the call may not connect — set `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` env vars to add a TURN relay for those cases.
 
 ## Tournament mode
 
@@ -30,12 +30,17 @@ Flip the lobby to **Tournament** (3–8 players, same room code / invites). It r
 
 ## Friends
 
-Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add friends by tag or from the results screen after a match; online friends can be invited to a room with one tap (they get an instant join prompt).
+Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add friends by tag or from the results screen after a match. The friend list shows live presence (offline / online / in lobby / in game) and toasts when a friend comes online; online friends can be invited to a room with one tap (they get an instant join prompt that expires after a bit, and declining tells the inviter).
+
+## Account transfer & recovery
+
+No accounts, but the profile still moves: the home screen's **Account** card issues a short-lived **link code** (type it on a new phone to make it this player) and a permanent **recovery code** (save it anywhere; it restores the profile — tag, friends and all — if the phone is lost). Claiming mid-match re-seats the new device into the running game.
 
 ## Architecture
 
 - `server.js` + `lib/` — Node + Express + `ws`. Fully server-authoritative: grid, target, fuse, puzzles, charges, and sabotage resolution live on the server; clients send intents and render.
 - `lib/config.js` — every playtesting variable (grid size, fuse, puzzle time, sabotage tuning) in one block; numeric values overridable via env vars.
+- `lib/identity.js` — device link codes (short-lived) and recovery codes (persistent) for the account-less identity model. `lib/client-config.js` — the config block shipped in hello payloads (incl. STUN/TURN).
 - `lib/game/` — the game domain, one responsibility per module:
   - `match.js` — the 2-player round engine (pick → live → roundEnd), transport-agnostic via injected send ports.
   - `sabotages.js` — one effect function per sabotage kind; adding a kind means a config entry + one function here, `Match` stays untouched.
@@ -43,12 +48,14 @@ Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add
   - `puzzle.js`, `grid.js`, `round-robin.js`, `room-code.js`, `rng.js` — pure helpers.
   - `tournament.js` — round-robin schedule, stages, standings, walkovers/forfeits.
   - `voice-channel.js` — voice roster + WebRTC signaling relay, scoped by a room-supplied group function.
-  - `room.js` — roster, lobby settings, mode dispatch (versus vs tournament), reconnect grace.
+  - `room.js` — roster, lobby settings, mode dispatch (versus vs tournament).
+  - `reconnect.js` — disconnect grace, seat re-attachment, and resume snapshots for a room.
+  - `serialize.js` + `persistence.js` — room/match/tournament state to `data/rooms.json` and back: rooms survive server restarts, revived paused until players reconnect.
   - `index.js` — the package's public surface (`Room`, `Match`, …).
-- `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `lobby`, `game-view` (grid/fuse/caller panel), `sabotage-fx` (searcher-side sabotage visuals), `board-themes` (board picker motifs, announce splash, Blackout torch, Drift motion), `tournament-view`, `results`, `voice` (WebRTC mesh), `install` (PWA prompt), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
+- `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `identity-ui` (account card: link/recovery/claim), `lobby`, `game-view` (grid/fuse/caller panel), `sabotage-fx` (searcher-side sabotage visuals), `board-themes` (board picker motifs, announce splash, Blackout torch, Drift motion), `tournament-view`, `results`, `voice` (WebRTC mesh), `voice-meter` (WebAudio speaking detection + highlights), `install` (PWA prompt), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
 - Engineering standard: [docs/ENGINEERING.md](docs/ENGINEERING.md) — hard rules, style, and definition of done for every change.
-- `data/store.json` — profiles and friendships (atomic JSON writes). Rooms are in-memory.
-- Reconnect grace: a dropped player has 30s to rejoin their seat; the round pauses meanwhile.
+- `data/store.json` — profiles and friendships; `data/rooms.json` — live room/match state (both atomic JSON writes). A server restart revives every room paused, mid-round state included.
+- Reconnect grace: a dropped player has 30s to rejoin their seat; the round pauses meanwhile (and resumes only when both players are back).
 
 ## Test
 

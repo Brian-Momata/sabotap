@@ -19,7 +19,12 @@ const ENV = {
   RECONNECT_GRACE_MS: '3000',
   PAIRING_DELAY_MS: '300',
   FUSE_TICK_MS: '100',
+  LINK_CODE_TTL_MS: '1500',
+  CLAIM_MAX_ATTEMPTS: '2',
   STORE_FILE: path.join(os.tmpdir(), `sabotap-test-store-${Date.now()}.json`),
+  ROOMS_FILE: path.join(os.tmpdir(), `sabotap-test-rooms-${Date.now()}.json`),
+  ROOM_AUTOSAVE_MS: '300',
+  ROOM_SAVE_DEBOUNCE_MS: '50',
 };
 
 let passed = 0;
@@ -110,19 +115,32 @@ async function playRoundAsSearcherWin(clients, seats, roundMsgAll) {
   return end;
 }
 
-async function main() {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sabotap-test-'));
-  const server = spawn('node', [path.join(__dirname, '..', 'server.js')], {
+async function startServer(cwd) {
+  const proc = spawn('node', [path.join(__dirname, '..', 'server.js')], {
     env: ENV,
-    cwd: dataDir, // keep test store out of the repo? store path is absolute to repo — see note below
+    cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  server.stderr.on('data', d => process.stderr.write('[server] ' + d));
+  proc.stderr.on('data', d => process.stderr.write('[server] ' + d));
   await new Promise((resolve, reject) => {
-    server.stdout.on('data', d => { if (String(d).includes('listening')) resolve(); });
-    server.on('exit', () => reject(new Error('server exited early')));
+    proc.stdout.on('data', d => { if (String(d).includes('listening')) resolve(); });
+    proc.on('exit', () => reject(new Error('server exited early')));
     setTimeout(() => reject(new Error('server did not start')), 5000);
   });
+  return proc;
+}
+
+async function main() {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sabotap-test-'));
+  let server = await startServer(dataDir);
+
+  // Graceful restart against the same store/rooms files, as a redeploy would.
+  async function restartServer() {
+    const exited = new Promise(r => server.once('exit', r));
+    server.kill('SIGTERM');
+    await exited;
+    server = await startServer(dataDir);
+  }
 
   const A = new Client('A');
   const B = new Client('B');
@@ -286,14 +304,128 @@ async function main() {
     assert(flC.list.find(f => f.id === helloD.you.id).online === true, 'friend shows online presence');
     C.send({ t: 'create' });
     const roomC = await C.waitFor('room');
+    await D.waitFor('friends', m => m.list.some(f => f.id === helloC.you.id && f.presence === 'lobby'));
+    assert(true, 'friend presence shows in-lobby after room create');
     C.send({ t: 'friendInvite', id: helloD.you.id });
     const invite = await D.waitFor('invite');
     assert(invite.code === roomC.code && invite.from.name === 'Cy', 'friend invite carries room code');
-    D.send({ t: 'join', code: invite.code });
+    assert(invite.ttlMs > 0, 'invite carries an expiry ttl');
+    D.send({ t: 'inviteDecline', id: helloC.you.id });
+    const declined = await C.waitFor('inviteDeclined');
+    assert(declined.from.name === 'Dee', 'invite decline is relayed to the inviter');
+    C.send({ t: 'friendInvite', id: helloD.you.id });
+    const invite2 = await D.waitFor('invite');
+    D.send({ t: 'join', code: invite2.code });
     await D.waitFor('room', m => m.players.length === 2);
     assert(true, 'invitee joined via invite');
 
+    // A third friend observes in-match presence once C's room starts playing.
+    const E = new Client('E');
+    await E.connect();
+    E.send({ t: 'hello', playerId: 'test_e_' + Date.now(), name: 'Eve' });
+    const helloE = await E.waitFor('hello');
+    C.send({ t: 'friendAdd', tag: helloE.you.tag });
+    await E.waitFor('friendRequest');
+    E.send({ t: 'friendAccept', id: helloC.you.id });
+    await C.waitFor('friends', m => m.list.some(f => f.id === helloE.you.id && f.status === 'accepted'));
+    D.send({ t: 'ready', ready: true });
+    await C.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    C.send({ t: 'start' });
+    await E.waitFor('friends', m => m.list.some(f => f.id === helloC.you.id && f.presence === 'match'));
+    assert(true, 'friend presence shows in-match after the room starts');
+    E.close();
+
     C.close(); D.close(); S2.close();
+
+    // --- identity: link + recovery codes, claim, lockout, expiry ---
+    const X = new Client('X');
+    await X.connect();
+    X.send({ t: 'hello', playerId: 'test_x_' + Date.now(), name: 'Xan' });
+    const helloX = await X.waitFor('hello');
+    X.send({ t: 'linkCodeGet' });
+    const lc = await X.waitFor('linkCode');
+    assert(typeof lc.code === 'string' && lc.code.length === 6 && lc.expiresInMs > 0, 'link code issued with a ttl');
+    X.send({ t: 'recoveryCodeGet' });
+    const rc1 = await X.waitFor('recoveryCode');
+    X.send({ t: 'recoveryCodeGet' });
+    const rc2 = await X.waitFor('recoveryCode');
+    assert(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(rc1.code) && rc1.code === rc2.code, 'recovery code is stable across requests');
+
+    const Y = new Client('Y');
+    await Y.connect();
+    Y.send({ t: 'hello', playerId: 'test_y_' + Date.now(), name: 'Yara' });
+    await Y.waitFor('hello');
+    Y.send({ t: 'claim', code: lc.code });
+    const claimed = await Y.waitFor('claimed');
+    assert(claimed.you.id === helloX.you.id && claimed.you.tag === helloX.you.tag, 'link-code claim adopts the profile');
+    Y.send({ t: 'claim', code: lc.code });
+    const reuse = await Y.waitFor('error');
+    assert(/invalid|expired/i.test(reuse.msg), 'link code is single-use');
+
+    const Z = new Client('Z');
+    await Z.connect();
+    Z.send({ t: 'hello', playerId: 'test_z_' + Date.now(), name: 'Zed' });
+    await Z.waitFor('hello');
+    Z.send({ t: 'claim', code: rc1.code.toLowerCase() });
+    const claimed2 = await Z.waitFor('claimed');
+    assert(claimed2.you.id === helloX.you.id, 'recovery-code claim restores the profile (case-insensitive)');
+
+    const W = new Client('W');
+    await W.connect();
+    W.send({ t: 'hello', playerId: 'test_w_' + Date.now(), name: 'Wyn' });
+    await W.waitFor('hello');
+    W.send({ t: 'claim', code: 'NOPE99' });
+    await W.waitFor('error', m => /invalid/i.test(m.msg));
+    W.send({ t: 'claim', code: 'NOPE98' });
+    await W.waitFor('error', m => /invalid/i.test(m.msg));
+    W.send({ t: 'claim', code: rc1.code });
+    await W.waitFor('error', m => /too many/i.test(m.msg));
+    assert(true, 'claim attempts are limited per connection');
+
+    Z.send({ t: 'linkCodeGet' });
+    const lcExp = await Z.waitFor('linkCode');
+    await sleep(Number(ENV.LINK_CODE_TTL_MS) + 300);
+    const Q = new Client('Q');
+    await Q.connect();
+    Q.send({ t: 'hello', playerId: 'test_q_' + Date.now(), name: 'Quo' });
+    await Q.waitFor('hello');
+    Q.send({ t: 'claim', code: lcExp.code });
+    const expired = await Q.waitFor('error');
+    assert(/invalid|expired/i.test(expired.msg), 'expired link code is rejected');
+    X.close(); Y.close(); Z.close(); W.close(); Q.close();
+
+    // --- identity: claiming mid-match resumes the seat on the new device ---
+    const M1 = new Client('M1');
+    const M2 = new Client('M2');
+    await M1.connect();
+    await M2.connect();
+    M1.send({ t: 'hello', playerId: 'test_m1_' + Date.now(), name: 'Mia' });
+    M2.send({ t: 'hello', playerId: 'test_m2_' + Date.now(), name: 'Moe' });
+    await M1.waitFor('hello');
+    const hm2 = await M2.waitFor('hello');
+    M1.send({ t: 'create' });
+    const mroom = await M1.waitFor('room');
+    M2.send({ t: 'join', code: mroom.code });
+    await M1.waitFor('room', m => m.players.length === 2);
+    M2.send({ t: 'ready', ready: true });
+    await M1.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    M1.send({ t: 'start' });
+    const mrs1 = await M1.waitFor('roundStart');
+    await M2.waitFor('roundStart');
+    (mrs1.callerSeat === 0 ? M1 : M2).send({ t: 'pick', index: 2 });
+    await M1.waitFor('live');
+    await M2.waitFor('live');
+    M2.send({ t: 'linkCodeGet' });
+    const mlc = await M2.waitFor('linkCode');
+    const M3 = new Client('M3');
+    await M3.connect();
+    M3.send({ t: 'hello', playerId: 'test_m3_' + Date.now(), name: 'New Phone' });
+    await M3.waitFor('hello');
+    M3.send({ t: 'claim', code: mlc.code });
+    await M3.waitFor('claimed', m => m.you.id === hm2.you.id);
+    const mresume = await M3.waitFor('resume');
+    assert(mresume.match && mresume.match.phase === 'live', 'claiming mid-match resumes the seat on the new device');
+    M1.close(); M2.close(); M3.close();
 
     // --- tournament: 3 players, round-robin with byes ---
     const T = [new Client('T1'), new Client('T2'), new Client('T3')];
@@ -516,6 +648,143 @@ async function main() {
     assert(mirrorsGrid2.length === 56 && new Set(mirrorsGrid2).size === 56 && mirrorsGrid2.every(v => typeof v === 'number'),
       'mirrors grid stays 56 unique numbers');
     R1.close(); R2.close();
+
+    // --- room persistence: mid-round server restart, full restore ---
+    const P1 = new Client('P1');
+    const P2 = new Client('P2');
+    await P1.connect();
+    await P2.connect();
+    const p1Id = 'test_p1_' + Date.now();
+    const p2Id = 'test_p2_' + Date.now();
+    P1.send({ t: 'hello', playerId: p1Id, name: 'Poe' });
+    P2.send({ t: 'hello', playerId: p2Id, name: 'Quill' });
+    await P1.waitFor('hello');
+    await P2.waitFor('hello');
+    P1.send({ t: 'create' });
+    const proom = await P1.waitFor('room');
+    P2.send({ t: 'join', code: proom.code });
+    await P1.waitFor('room', m => m.players.length === 2);
+    P2.send({ t: 'ready', ready: true });
+    await P1.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    P1.send({ t: 'start' });
+    const prs = await P1.waitFor('roundStart');
+    const prs2 = await P2.waitFor('roundStart');
+    await playRoundAsSearcherWin([P1, P2], [0, 1], { [prs.you]: prs, [prs2.you]: prs2 });
+    const r1Winner = 1 - prs.callerSeat; // searcher won round 1
+    const pr2a = await P1.waitFor('roundStart', m => m.round === 2);
+    await P2.waitFor('roundStart', m => m.round === 2);
+    const pCaller = pr2a.callerSeat === 0 ? P1 : P2;
+    const pSearcher = pCaller === P1 ? P2 : P1;
+    pCaller.send({ t: 'pick', index: 5 });
+    const plive = await pSearcher.waitFor('live');
+    await pCaller.waitFor('live');
+    await restartServer();
+    const P1b = new Client('P1b');
+    await P1b.connect();
+    P1b.send({ t: 'hello', playerId: p1Id, name: 'Poe' });
+    await P1b.waitFor('hello');
+    const res1 = await P1b.waitFor('resume');
+    assert(res1.code === proom.code && res1.match && res1.match.phase === 'live',
+      'restart: room and live round revived from disk');
+    assert(res1.match.round === 2 && res1.match.score[r1Winner] === 1,
+      'restart: score and round number survive');
+    const ppause = await P1b.waitFor('opponentStatus');
+    assert(ppause.connected === false, 'restart: first returner stays paused until the opponent is back');
+    await sleep(400);
+    assert(!P1b.inbox.some(m => m.t === 'fuse'), 'restart: fuse stays frozen while the opponent is away');
+    const P2b = new Client('P2b');
+    await P2b.connect();
+    P2b.send({ t: 'hello', playerId: p2Id, name: 'Quill' });
+    await P2b.waitFor('hello');
+    const res2 = await P2b.waitFor('resume');
+    const searcherSeat2 = 1 - pr2a.callerSeat;
+    const sRes = searcherSeat2 === 0 ? res1 : res2;
+    const sClient = searcherSeat2 === 0 ? P1b : P2b;
+    assert(sRes.match.target === plive.target && Array.isArray(sRes.match.grid),
+      'restart: searcher snapshot keeps the target and grid');
+    await P1b.waitFor('opponentStatus', m => m.connected === true);
+    sClient.send({ t: 'tap', index: sRes.match.grid.indexOf(sRes.match.target) });
+    const pend = await sClient.waitFor('roundEnd', m => m.reason === 'found');
+    assert(pend.history.length === 2, 'restart: revived round completes and history advances');
+    P1b.close(); P2b.close(); P1.close(); P2.close();
+
+    // --- room persistence: lobby room survives; unreturned player expires ---
+    const L1 = new Client('L1');
+    const L2 = new Client('L2');
+    await L1.connect();
+    await L2.connect();
+    const l1Id = 'test_l1_' + Date.now();
+    L1.send({ t: 'hello', playerId: l1Id, name: 'Lil' });
+    L2.send({ t: 'hello', playerId: 'test_l2_' + Date.now(), name: 'Mo' });
+    await L1.waitFor('hello');
+    await L2.waitFor('hello');
+    L1.send({ t: 'create' });
+    const lroom = await L1.waitFor('room');
+    L1.send({ t: 'settings', difficulty: 'frantic', board: 'blackout' });
+    await L1.waitFor('room', m => m.settings.board === 'blackout');
+    L2.send({ t: 'join', code: lroom.code });
+    await L1.waitFor('room', m => m.players.length === 2);
+    await restartServer();
+    const L1b = new Client('L1b');
+    await L1b.connect();
+    L1b.send({ t: 'hello', playerId: l1Id, name: 'Lil' });
+    await L1b.waitFor('hello');
+    const lres = await L1b.waitFor('resume');
+    assert(lres.code === lroom.code && lres.phase === 'lobby' && lres.players.length === 2
+      && lres.settings.difficulty === 'frantic' && lres.settings.board === 'blackout',
+      'restart: lobby room revives with settings and roster');
+    const lAfter = await L1b.waitFor('room', m => m.players.length === 1, 8000);
+    assert(lAfter.players[0].name === 'Lil', 'restart: a player who never returns expires after grace');
+    L1b.close(); L1.close(); L2.close();
+
+    // --- room persistence: tournament mid-stage restart ---
+    const K = [new Client('K1'), new Client('K2'), new Client('K3')];
+    await Promise.all(K.map(c => c.connect()));
+    const kIds = K.map((_, i) => `test_k${i}_` + Date.now());
+    K.forEach((c, i) => c.send({ t: 'hello', playerId: kIds[i], name: 'K' + (i + 1) }));
+    await Promise.all(K.map(c => c.waitFor('hello')));
+    K[0].send({ t: 'create' });
+    const kroom = await K[0].waitFor('room');
+    K[0].send({ t: 'settings', mode: 'tournament' });
+    await K[0].waitFor('room', m => m.settings.mode === 'tournament');
+    K[1].send({ t: 'join', code: kroom.code });
+    K[2].send({ t: 'join', code: kroom.code });
+    await K[0].waitFor('room', m => m.players.length === 3);
+    K[1].send({ t: 'ready', ready: true });
+    K[2].send({ t: 'ready', ready: true });
+    await K[0].waitFor('room', m => m.players.filter(p => p.ready).length === 3);
+    K[0].send({ t: 'start' });
+    // stage 1: seat 0 sits out; seats 1 & 2 reach a live round, then the server dies
+    const krs1 = await K[1].waitFor('roundStart', () => true, 10000);
+    await K[2].waitFor('roundStart', () => true, 10000);
+    const kCallerIdx = krs1.role === 'caller' ? 1 : 2;
+    const kSearcherIdx = kCallerIdx === 1 ? 2 : 1;
+    K[kCallerIdx].send({ t: 'pick', index: 1 });
+    const klive = await K[kSearcherIdx].waitFor('live');
+    await K[kCallerIdx].waitFor('live');
+    await restartServer();
+    const KB = [new Client('K1b'), new Client('K2b'), new Client('K3b')];
+    await Promise.all(KB.map(c => c.connect()));
+    KB.forEach((c, i) => c.send({ t: 'hello', playerId: kIds[i], name: 'K' + (i + 1) }));
+    await Promise.all(KB.map(c => c.waitFor('hello')));
+    const kres = await Promise.all(KB.map(c => c.waitFor('resume')));
+    assert(kres.every(r => r.settings.mode === 'tournament' && r.code === kroom.code),
+      'restart: tournament room revives for all seats');
+    assert(kres[kSearcherIdx].match && kres[kSearcherIdx].match.phase === 'live'
+      && kres[kSearcherIdx].match.target === klive.target,
+      'restart: tournament stage match revives mid-round');
+    KB[kSearcherIdx].send({ t: 'tap', index: kres[kSearcherIdx].match.grid.indexOf(kres[kSearcherIdx].match.target) });
+    await KB[kSearcherIdx].waitFor('roundEnd', m => m.reason === 'found', 8000);
+    // round 2: roles swap inside the revived match; finish it to close the stage
+    await KB[kSearcherIdx].waitFor('roundStart', m => m.round === 2, 8000);
+    KB[kSearcherIdx].send({ t: 'pick', index: 0 });
+    const klive2 = await KB[kCallerIdx].waitFor('live', () => true, 8000);
+    KB[kCallerIdx].send({ t: 'tap', index: klive2.grid.indexOf(klive2.target) });
+    await KB[kCallerIdx].waitFor('roundEnd', () => true, 8000);
+    const kpair2 = await KB[0].waitFor('tPairing', m => m.stage === 2, 10000);
+    assert(kpair2.stage === 2, 'restart: the schedule advances to the next stage after revival');
+    KB.forEach(c => c.close());
+    K.forEach(c => c.close());
 
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {

@@ -5,9 +5,10 @@ import { connect, send } from './net.js';
 import { show, toast } from './ui.js';
 import { renderLobby } from './lobby.js';
 import { setAvatarFromName } from './home.js';
-import { handlers } from './handlers.js';
+import { handlers, declineInvite } from './handlers.js';
 import { joinVoice, leaveVoice, toggleVoiceMute } from './voice.js';
 import { setupInstall } from './install.js';
+import { setupIdentityUi } from './identity-ui.js';
 
 /* ---------- home ---------- */
 
@@ -91,7 +92,7 @@ $('addFriendResultBtn').onclick = () => {
   // so ask it via the tag of the profile — fetch through a targeted add.
   send({ t: 'friendAdd', tag: opp.tag || '' });
 };
-$('inviteDeclineBtn').onclick = () => $('inviteOverlay').classList.remove('on');
+$('inviteDeclineBtn').onclick = declineInvite;
 $('tendLobbyBtn').onclick = () => {
   renderLobby();
   show('s-lobby');
@@ -117,6 +118,7 @@ $('voiceMuteBtn').onclick = toggleVoiceMute;
 /* ---------- boot ---------- */
 
 setupInstall();
+setupIdentityUi();
 
 const hashCode = location.hash.replace('#', '').trim().toUpperCase();
 if (/^[A-Z]{3,4}-\d{2}$/.test(hashCode)) {

@@ -26,7 +26,8 @@ export function renderFriends() {
     const row = document.createElement('div');
     row.className = 'friend-row';
     const dot = document.createElement('span');
-    dot.className = 'dot' + (f.online ? ' online' : '');
+    dot.className = 'dot' + (f.online ? ' online' : '')
+      + (f.presence === 'lobby' || f.presence === 'match' ? ` ${f.presence}` : '');
     const name = document.createElement('span');
     name.className = 'friend-name';
     name.textContent = f.name;
@@ -34,6 +35,12 @@ export function renderFriends() {
     tag.className = 'friend-tag mono';
     tag.textContent = f.tag;
     row.append(dot, name, tag);
+    if (f.presence === 'lobby' || f.presence === 'match') {
+      const st = document.createElement('span');
+      st.className = 'friend-presence ' + f.presence;
+      st.textContent = f.presence === 'match' ? 'in game' : 'in lobby';
+      row.append(st);
+    }
     if (f.status === 'pending_in') {
       const btn = document.createElement('button');
       btn.className = 'chip-btn';
@@ -49,7 +56,7 @@ export function renderFriends() {
       const btn = document.createElement('button');
       btn.className = 'chip-btn';
       btn.textContent = 'Invite';
-      btn.disabled = !f.online;
+      btn.disabled = !f.online || f.presence === 'match';
       btn.onclick = () => inviteFriend(f);
       row.append(btn);
     }

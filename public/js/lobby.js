@@ -3,6 +3,7 @@
 import { $, state, esc } from './state.js';
 import { send } from './net.js';
 import { voice } from './voice.js';
+import { applySpeakingClasses } from './voice-meter.js';
 import { BOARD_MOTIF } from './board-themes.js';
 
 export function renderLobby() {
@@ -20,10 +21,14 @@ export function renderLobby() {
   for (const p of r.players) {
     const row = document.createElement('div');
     row.className = 'player-row';
-    const chip = p.seat === (r.host || 0)
-      ? '<span class="row-chip">HOST</span>'
-      : (p.ready ? '<span class="row-chip ready">READY</span>' : '<span class="row-chip">NOT READY</span>');
-    row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${p.seat === state.seat ? ' (you)' : ''}</span>${micBadge(p.id)}${chip}`;
+    row.innerHTML = `<span class="dot ${p.connected ? 'online' : ''}"></span><span style="flex:1">${esc(p.name)}${p.seat === state.seat ? ' (you)' : ''}</span>`;
+    const badge = micBadge(p.id);
+    if (badge) row.append(badge);
+    const chip = document.createElement('span');
+    const isHost = p.seat === (r.host || 0);
+    chip.className = 'row-chip' + (!isHost && p.ready ? ' ready' : '');
+    chip.textContent = isHost ? 'HOST' : (p.ready ? 'READY' : 'NOT READY');
+    row.append(chip);
     wrap.append(row);
   }
   if (r.players.length < maxP) {
@@ -73,6 +78,7 @@ export function renderLobby() {
       btn.textContent = "I'm Ready";
     }
   }
+  applySpeakingClasses(); // re-attach highlights after the innerHTML rebuild
 }
 
 // Host picks from motif cards; everyone else sees the current pick read-only.
@@ -104,14 +110,20 @@ function renderBoards(r, isHost) {
   }
 }
 
+// Built with createElement so the client-chosen playerId lands in dataset,
+// never inside an HTML attribute string (esc() does not escape quotes).
 function micBadge(playerId) {
   const m = voice.members.find(x => x.id === playerId);
-  if (!m) return '';
-  return `<span class="mic-badge${m.muted ? ' muted' : ''}" title="${m.muted ? 'In voice (muted)' : 'In voice'}">`
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  if (!m) return null;
+  const span = document.createElement('span');
+  span.className = 'mic-badge' + (m.muted ? ' muted' : '');
+  span.title = m.muted ? 'In voice (muted)' : 'In voice';
+  span.dataset.id = playerId;
+  span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     + '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>'
     + '<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line>'
-    + '<line class="slash" x1="2" y1="2" x2="22" y2="22"></line></svg></span>';
+    + '<line class="slash" x1="2" y1="2" x2="22" y2="22"></line></svg>';
+  return span;
 }
 
 function renderSegs(groupId, options, selected, enabled, onPick, label) {

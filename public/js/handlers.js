@@ -14,6 +14,19 @@ import { handleSabotage, applySwap, resetEffects } from './sabotage-fx.js';
 import { startCountdown, renderStandings, TWAIT_STATUS } from './tournament-view.js';
 import { renderResults } from './results.js';
 import { voice, voiceAllowed, voicePeer, syncVoicePeers, leaveVoice, renderVoiceDock } from './voice.js';
+import { showLinkCode, showRecoveryCode } from './identity-ui.js';
+
+function hideInvite() {
+  clearTimeout(state.inviteTimer);
+  state.inviteTimer = null;
+  state.pendingInvite = null;
+  $('inviteOverlay').classList.remove('on');
+}
+
+export function declineInvite() {
+  if (state.pendingInvite) send({ t: 'inviteDecline', id: state.pendingInvite.fromId });
+  hideInvite();
+}
 
 export const handlers = {
   hello(msg) {
@@ -30,6 +43,12 @@ export const handlers = {
   },
 
   friends(msg) {
+    // Toast accepted friends who just came online (hello always seeds the baseline).
+    const prev = new Map(state.friends.map(f => [f.id, f]));
+    for (const f of msg.list) {
+      const was = prev.get(f.id);
+      if (was && !was.online && f.online && f.status === 'accepted') toast(`${f.name} is online.`);
+    }
     state.friends = msg.list;
     renderFriends();
     if (!$('addFriendResultBtn').hidden && state.opponent) {
@@ -41,16 +60,44 @@ export const handlers = {
     toast(`${msg.from.name} (${msg.from.tag}) wants to be friends. Check your Friends list.`);
   },
 
+  linkCode(msg) {
+    showLinkCode(msg);
+  },
+
+  recoveryCode(msg) {
+    showRecoveryCode(msg);
+  },
+
+  claimed(msg) {
+    // Adopt the restored identity: same shape as hello, plus the new credential.
+    LS.playerId = msg.you.id;
+    handlers.hello(msg);
+    $('claimInput').value = '';
+    toast(`Profile restored. You are ${msg.you.name} (${msg.you.tag}).`);
+  },
+
   invite(msg) {
+    clearTimeout(state.inviteTimer);
+    state.pendingInvite = { fromId: msg.from.id, code: msg.code };
+    if (state.phase === 'pick' || state.phase === 'live' || state.phase === 'roundEnd') {
+      // Never cover a live grid with the overlay.
+      toast(`${msg.from.name} invited you to room ${msg.code}.`);
+      return;
+    }
     $('inviteTitle').textContent = `${msg.from.name} invited you`;
     $('inviteSub').textContent = `Join room ${msg.code} and play a match right now.`;
     $('inviteAcceptBtn').onclick = () => {
-      $('inviteOverlay').classList.remove('on');
+      hideInvite();
       send({ t: 'join', code: msg.code });
     };
     $('inviteOverlay').classList.add('on');
+    state.inviteTimer = setTimeout(hideInvite, msg.ttlMs || 45000);
     sfx.charge();
     buzz([50, 50, 50]);
+  },
+
+  inviteDeclined(msg) {
+    toast(`${msg.from.name} declined the invite.`);
   },
 
   room(msg) {

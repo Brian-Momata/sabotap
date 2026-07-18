@@ -8,13 +8,35 @@ const { WebSocketServer } = require('ws');
 const CONFIG = require('./lib/config');
 const Store = require('./lib/store');
 const Social = require('./lib/social');
-const { Room, makeRoomCode, boardList } = require('./lib/game');
+const Identity = require('./lib/identity');
+const { clientConfig } = require('./lib/client-config');
+const { Room, makeRoomCode, RoomPersistence } = require('./lib/game');
 
 const store = new Store(process.env.STORE_FILE || path.join(__dirname, 'data', 'store.json'));
-const social = new Social(store);
+const roomStore = new Store(
+  process.env.ROOMS_FILE || path.join(__dirname, 'data', 'rooms.json'),
+  { rooms: {} },
+  CONFIG.roomPersist.debounceMs
+);
 
 const rooms = new Map(); // code -> Room
 const roomOf = new Map(); // playerId -> code
+
+const social = new Social(store, id => {
+  const room = rooms.get(roomOf.get(id));
+  if (!room || room.seatOf(id) === -1) return 'online';
+  return room.phase === 'playing' ? 'match' : 'lobby';
+});
+const identity = new Identity(social);
+
+function helloPayload(t, profile) {
+  return {
+    t,
+    you: { id: profile.id, name: profile.name, tag: profile.tag },
+    friends: social.friendsOf(profile.id),
+    config: clientConfig(),
+  };
+}
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -23,31 +45,29 @@ app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size, online
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-function iceServers() {
-  const servers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
-  if (process.env.TURN_URL) {
-    servers.push({
-      urls: process.env.TURN_URL,
-      username: process.env.TURN_USERNAME || '',
-      credential: process.env.TURN_CREDENTIAL || '',
-    });
-  }
-  return servers;
-}
-
 function destroyRoom(code) {
   const room = rooms.get(code);
   if (room) room.players.forEach(p => roomOf.delete(p.id));
   rooms.delete(code);
+  persistence.remove(code);
+}
+
+// Constructs and registers a room under a given code — the revival path uses
+// this too, so hooks are wired in exactly one place.
+function adoptRoom(code) {
+  const room = new Room(code, destroyRoom);
+  room.onPhaseChange = () => room.players.forEach(p => notifyPresence(p.id));
+  rooms.set(code, room);
+  return room;
 }
 
 function createRoom() {
   let code;
   do { code = makeRoomCode(); } while (rooms.has(code));
-  const room = new Room(code, destroyRoom);
-  rooms.set(code, room);
-  return room;
+  return adoptRoom(code);
 }
+
+const persistence = new RoomPersistence(roomStore, { rooms, roomOf, makeRoom: adoptRoom });
 
 function send(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -84,6 +104,7 @@ function leaveRoom(playerId) {
 
 wss.on('connection', ws => {
   let me = null; // profile after hello
+  let claimFails = 0;
 
   const handlers = {
     hello(msg) {
@@ -94,22 +115,46 @@ wss.on('connection', ws => {
       if (prev && prev !== ws) { try { prev.close(); } catch {} }
       me = social.register(id, msg.name);
       social.online.set(id, ws);
-      send(ws, {
-        t: 'hello',
-        you: { id: me.id, name: me.name, tag: me.tag },
-        friends: social.friendsOf(id),
-        config: {
-          name: CONFIG.name,
-          roundsToWinOptions: CONFIG.roundsToWinOptions,
-          difficulties: Object.entries(CONFIG.difficulties).map(([key, d]) => ({ key, name: d.name, fuseMs: d.fuseMs })),
-          boards: boardList(),
-          iceServers: iceServers(),
-        },
-      });
+      send(ws, helloPayload('hello', me));
       notifyPresence(id);
       // Re-attach to a live seat if this device was mid-game.
       const room = roomFor(id);
       if (room) room.reconnect(id, ws);
+    },
+
+    linkCodeGet() {
+      send(ws, { t: 'linkCode', ...identity.issueLinkCode(me.id) });
+    },
+
+    recoveryCodeGet() {
+      send(ws, { t: 'recoveryCode', code: identity.recoveryCodeOf(me.id) });
+    },
+
+    claim(msg) {
+      if (claimFails >= CONFIG.identity.claimMaxAttempts) {
+        return send(ws, { t: 'error', msg: 'Too many attempts. Reconnect to try again.' });
+      }
+      const targetId = identity.resolve(msg.code);
+      if (!targetId) {
+        claimFails += 1;
+        return send(ws, { t: 'error', msg: 'Invalid or expired code.' });
+      }
+      if (targetId === me.id) return send(ws, { t: 'error', msg: 'That code points at this profile already.' });
+      // Adopt the claimed identity on this socket; the current (throwaway)
+      // profile is dropped unless it already has friendships.
+      const prev = social.online.get(targetId);
+      if (prev && prev !== ws) { try { prev.close(); } catch {} }
+      const oldId = me.id;
+      leaveRoom(oldId);
+      social.online.delete(oldId);
+      social.discardIfUnused(oldId);
+      me = social.register(targetId, '');
+      social.online.set(targetId, ws);
+      notifyPresence(oldId);
+      notifyPresence(targetId);
+      send(ws, helloPayload('claimed', me));
+      const room = roomFor(targetId);
+      if (room) room.reconnect(targetId, ws);
     },
 
     setName(msg) {
@@ -123,6 +168,7 @@ wss.on('connection', ws => {
       const room = createRoom();
       room.addPlayer({ id: me.id, name: me.name, tag: me.tag, ws });
       roomOf.set(me.id, room.code);
+      notifyPresence(me.id);
     },
 
     join(msg) {
@@ -134,11 +180,13 @@ wss.on('connection', ws => {
       const res = room.addPlayer({ id: me.id, name: me.name, tag: me.tag, ws });
       if (!res.ok) return send(ws, { t: 'error', msg: res.error });
       roomOf.set(me.id, code);
+      notifyPresence(me.id);
     },
 
     leave() {
       leaveRoom(me.id);
       send(ws, { t: 'left' });
+      notifyPresence(me.id);
     },
 
     settings(msg) {
@@ -230,8 +278,16 @@ wss.on('connection', ws => {
       if (!friend) return send(ws, { t: 'error', msg: 'Not in your friends list.' });
       const theirWs = social.online.get(friend.id);
       if (!theirWs) return send(ws, { t: 'error', msg: `${friend.name} is offline.` });
-      send(theirWs, { t: 'invite', from: { id: me.id, name: me.name, tag: me.tag }, code });
+      send(theirWs, { t: 'invite', from: { id: me.id, name: me.name, tag: me.tag }, code, ttlMs: CONFIG.inviteTtlMs });
       send(ws, { t: 'toast', msg: `Invite sent to ${friend.name}.` });
+    },
+
+    inviteDecline(msg) {
+      // Relay only to accepted friends so declines can't be used to probe strangers.
+      const friend = social.friendsOf(me.id).find(f => f.id === msg.id && f.status === 'accepted');
+      if (!friend) return;
+      const theirWs = social.online.get(friend.id);
+      if (theirWs) send(theirWs, { t: 'inviteDeclined', from: { id: me.id, name: me.name } });
     },
   };
 
@@ -248,6 +304,8 @@ wss.on('connection', ws => {
       console.error('handler error:', msg.t, e);
       send(ws, { t: 'error', msg: 'Server error.' });
     }
+    const room = me && roomFor(me.id);
+    if (room) persistence.touch(room);
   });
 
   ws.on('close', () => {
@@ -256,14 +314,19 @@ wss.on('connection', ws => {
       social.online.delete(me.id);
       notifyPresence(me.id);
       const room = roomFor(me.id);
-      if (room) room.handleDisconnect(me.id);
+      if (room) {
+        room.handleDisconnect(me.id);
+        persistence.touch(room);
+      }
     }
   });
 });
+
+persistence.restore();
 
 server.listen(CONFIG.port, () => {
   console.log(`${CONFIG.name} listening on http://localhost:${CONFIG.port}`);
 });
 
-process.on('SIGINT', () => { store.flush(); process.exit(0); });
-process.on('SIGTERM', () => { store.flush(); process.exit(0); });
+process.on('SIGINT', () => { store.flush(); persistence.flushAll(); process.exit(0); });
+process.on('SIGTERM', () => { store.flush(); persistence.flushAll(); process.exit(0); });

@@ -4,6 +4,7 @@ import { $, state } from './state.js';
 import { send } from './net.js';
 import { toast } from './ui.js';
 import { renderLobby } from './lobby.js';
+import { attachMeter, detachMeter, stopMeters } from './voice-meter.js';
 
 export const voice = { joined: false, muted: false, stream: null, peers: new Map(), members: [], allowed: null };
 window.voice = voice; // exposed for automated tests
@@ -26,12 +27,14 @@ async function startMic() {
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   voice.stream = stream;
+  if (state.you) attachMeter(state.you.id, stream);
   const track = stream.getAudioTracks()[0];
   voice.peers.forEach(entry => { entry.sender.replaceTrack(track).catch(() => {}); });
 }
 
 function stopMic() {
   if (!voice.stream) return;
+  if (state.you) detachMeter(state.you.id);
   voice.stream.getTracks().forEach(tr => tr.stop());
   voice.stream = null;
   voice.peers.forEach(entry => { entry.sender.replaceTrack(null).catch(() => {}); });
@@ -56,6 +59,7 @@ export async function joinVoice() {
 export function leaveVoice(notify = true) {
   if (!voice.joined) return;
   if (notify) send({ t: 'voiceLeave' });
+  stopMeters();
   voice.peers.forEach(entry => {
     try { entry.pc.close(); } catch {}
     entry.audio.remove();
@@ -107,6 +111,7 @@ export function voicePeer(id, initiator) {
   if (voice.stream) sender.replaceTrack(voice.stream.getAudioTracks()[0]).catch(() => {});
   pc.ontrack = e => {
     audio.srcObject = e.streams[0];
+    attachMeter(id, e.streams[0]);
     // Autoplay can be blocked when the track arrives outside a user gesture
     // (e.g. someone joins voice long after we did) — retry on the next tap.
     audio.play().catch(() => {
@@ -128,6 +133,7 @@ export function voicePeer(id, initiator) {
 function dropVoicePeer(id) {
   const entry = voice.peers.get(id);
   if (!entry) return;
+  detachMeter(id);
   try { entry.pc.close(); } catch {}
   entry.audio.remove();
   voice.peers.delete(id);

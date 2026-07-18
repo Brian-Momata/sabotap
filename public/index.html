@@ -62,6 +62,34 @@
       <button class="chip-btn ghost" id="friendAddBtn" style="padding: 14px 16px;">Add</button>
     </div>
 
+    <div class="section-label">Account</div>
+    <div class="account-card">
+      <button class="account-toggle" id="accountToggle" type="button">
+        Move or restore your profile
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div class="account-body" id="accountBody" hidden>
+        <div class="account-item">
+          <div class="account-info">
+            <div class="account-title">Link a new device</div>
+            <div class="account-sub" id="linkCodeOut">Get a short-lived code and type it on the other device. Both devices then play as this profile.</div>
+          </div>
+          <button class="chip-btn ghost" id="linkCodeBtn">Get code</button>
+        </div>
+        <div class="account-item">
+          <div class="account-info">
+            <div class="account-title">Recovery code</div>
+            <div class="account-sub" id="recoveryCodeOut">Restores this profile — tag, friends and all — if this phone is ever lost.</div>
+          </div>
+          <button class="chip-btn ghost" id="recoveryCodeBtn">Show</button>
+        </div>
+        <div class="row">
+          <input type="text" id="claimInput" class="mono" placeholder="ENTER A CODE" maxlength="16" autocomplete="off">
+          <button class="chip-btn ghost" id="claimBtn">Restore</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="settings-row">
       <button class="setting-pill on" id="soundToggle" type="button">
         <span class="setting-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a9 9 0 0 1 0 14"></path></svg></span>
@@ -250,6 +278,7 @@
     <span class="voice-lbl">Voice</span>
   </button>
   <div id="voiceLive" class="voice-live" hidden>
+    <span class="voice-speaker" id="voiceSpeaker" hidden></span>
     <span class="voice-count" id="voiceCount"></span>
     <button id="voiceMuteBtn" class="voice-btn round" aria-label="Toggle mute">
       <span class="voice-chip">
