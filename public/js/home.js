@@ -3,17 +3,23 @@
 import { $, state } from './state.js';
 import { send } from './net.js';
 
+export function setAvatarFromName(name) {
+  const ch = (name || '').trim().charAt(0);
+  $('youAvatar').textContent = ch ? ch.toUpperCase() : '?';
+}
+
 export function renderYou() {
   if (!state.you) return;
   $('youTag').textContent = state.you.tag;
   if (!$('nameInput').value) $('nameInput').value = state.you.name;
+  setAvatarFromName($('nameInput').value);
 }
 
 export function renderFriends() {
   const list = $('friendList');
   list.innerHTML = '';
   if (!state.friends.length) {
-    list.innerHTML = '<div class="friend-row"><span class="friend-name" style="color: var(--text-3);">No friends yet — add one by tag, or after a match.</span></div>';
+    list.innerHTML = '<div class="friend-row"><span class="friend-name" style="color: var(--text-3);">No friends yet. Add one by tag, or after a match.</span></div>';
     return;
   }
   for (const f of state.friends) {

@@ -26,7 +26,7 @@ export async function joinVoice() {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch {
-    toast('Microphone blocked — allow mic access to use voice chat.');
+    toast('Microphone blocked. Allow mic access to use voice chat.');
     return;
   }
   voice.stream = stream;

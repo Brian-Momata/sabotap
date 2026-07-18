@@ -38,7 +38,7 @@ export function renderStandings(el, rows) {
 }
 
 export const TWAIT_STATUS = {
-  finished: 'Match done — waiting for the other matches to finish',
-  bye: 'You sit out this stage — back in the next pairing',
-  walkover: 'Walkover — your opponent left. Waiting for the other matches',
+  finished: 'Match done. Waiting for the other matches to finish',
+  bye: 'You sit out this stage, back in the next pairing',
+  walkover: 'Walkover. Your opponent left. Waiting for the other matches',
 };

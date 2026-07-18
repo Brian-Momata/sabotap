@@ -36,7 +36,7 @@ export function setupInstall() {
   window.addEventListener('appinstalled', () => {
     deferredInstall = null;
     $('installCard').hidden = true;
-    toast('Sabotap installed — find it on your home screen.');
+    toast('Sabotap installed. Find it on your home screen.');
   });
 
   $('installBtn').onclick = async () => {

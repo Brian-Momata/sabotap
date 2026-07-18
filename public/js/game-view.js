@@ -29,7 +29,7 @@ export function renderFuse(v) {
   $('fusePct').textContent = pct + '%';
   const wrap = $('fuseWrap');
   wrap.classList.toggle('critical', v >= 0.8);
-  $('fuseName').textContent = v >= 0.8 ? 'FUSE — CRITICAL' : 'FUSE';
+  $('fuseName').textContent = v >= 0.8 ? 'FUSE · CRITICAL' : 'FUSE';
 }
 
 // Drift builds row containers (so each row can move as one unit) while every

@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'sabotap-v4';
+const CACHE = 'sabotap-v5';
 const SHELL = [
   '/', '/index.html', '/style.css', '/manifest.webmanifest', '/icons/icon.svg',
   // Keep this list in sync with public/js/ — every module must be precached

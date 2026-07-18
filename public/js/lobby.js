@@ -49,7 +49,7 @@ export function renderLobby() {
   renderSegs('diffGroup', diffs.map(d => d.key), r.settings.difficulty, isHost,
     v => send({ t: 'settings', difficulty: v }), k => (diffs.find(d => d.key === k) || { name: k }).name);
   const cur = diffs.find(d => d.key === r.settings.difficulty);
-  $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse — faster fuse, faster puzzles, trickier digits.` : '';
+  $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse. Faster fuse, faster puzzles, trickier digits.` : '';
 
   renderBoards(r, isHost);
 
@@ -67,7 +67,7 @@ export function renderLobby() {
     const me = r.players.find(x => x.seat === state.seat);
     btn.disabled = false;
     if (me && me.ready) {
-      btn.textContent = 'Ready — host starts the match';
+      btn.textContent = 'Ready · host starts the match';
       btn.classList.add('btn-ready');
     } else {
       btn.textContent = "I'm Ready";
@@ -81,7 +81,7 @@ function renderBoards(r, isHost) {
   const selected = r.settings.board || 'standard';
   const wrap = $('boardGroup');
   wrap.innerHTML = '';
-  $('boardLabel').textContent = isHost ? 'Board' : 'Board — set by host';
+  $('boardLabel').textContent = isHost ? 'Board' : 'Board · set by host';
   if (!boards.length) return;
   if (isHost) {
     wrap.className = 'board-grid';

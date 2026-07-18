@@ -4,6 +4,7 @@ import { $, LS, state, prefs } from './state.js';
 import { connect, send } from './net.js';
 import { show, toast } from './ui.js';
 import { renderLobby } from './lobby.js';
+import { setAvatarFromName } from './home.js';
 import { handlers } from './handlers.js';
 import { joinVoice, leaveVoice, toggleVoiceMute } from './voice.js';
 import { setupInstall } from './install.js';
@@ -17,6 +18,9 @@ $('nameInput').addEventListener('change', () => {
     send({ t: 'setName', name });
   }
 });
+
+$('nameInput').addEventListener('input', () => setAvatarFromName($('nameInput').value));
+$('nameEditBtn').onclick = () => { const i = $('nameInput'); i.focus(); i.select(); };
 
 $('createBtn').onclick = () => send({ t: 'create' });
 
@@ -39,7 +43,7 @@ $('friendAddBtn').onclick = () => {
 $('shareBtn').onclick = async () => {
   if (!state.room) return;
   const url = `${location.origin}/#${state.room.code}`;
-  const text = `Play Sabotap with me — room ${state.room.code}`;
+  const text = `Play Sabotap with me, room ${state.room.code}`;
   if (navigator.share) {
     try { await navigator.share({ title: 'Sabotap', text, url }); } catch {}
   } else {
@@ -97,9 +101,7 @@ $('tendLobbyBtn').onclick = () => {
 /* ---------- prefs ---------- */
 
 function renderPrefButtons() {
-  $('soundToggle').textContent = `Sound: ${prefs.sound ? 'on' : 'off'}`;
   $('soundToggle').classList.toggle('on', prefs.sound);
-  $('hapticsToggle').textContent = `Haptics: ${prefs.haptics ? 'on' : 'off'}`;
   $('hapticsToggle').classList.toggle('on', prefs.haptics);
 }
 $('soundToggle').onclick = () => { prefs.sound = !prefs.sound; renderPrefButtons(); };

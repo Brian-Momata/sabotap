@@ -1,7 +1,7 @@
 {
   "name": "Sabotap",
   "short_name": "Sabotap",
-  "description": "Find the number before the fuse burns out — while your opponent sabotages the board.",
+  "description": "Find the number before the fuse burns out, while your opponent sabotages the board.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

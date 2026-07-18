@@ -22,11 +22,20 @@
     <div style="margin: 26px 0 6px;">
       <div class="eyebrow" style="color: var(--accent-searcher); margin-bottom: 10px;">Two phones · one grid</div>
       <div class="title">Sabotap</div>
-      <div class="subtitle">Find the number before the fuse burns out — while your opponent sabotages the board.</div>
+      <div class="subtitle">Find the number before the fuse burns out, while your opponent sabotages the board.</div>
     </div>
 
     <div class="section-label">You</div>
-    <input type="text" id="nameInput" placeholder="Your name" maxlength="20" autocomplete="off">
+    <div class="profile-chip">
+      <div class="avatar" id="youAvatar">?</div>
+      <div class="profile-main">
+        <div class="profile-label">Your name</div>
+        <input type="text" id="nameInput" placeholder="Tap to set your name" maxlength="20" autocomplete="off">
+      </div>
+      <button class="profile-edit" id="nameEditBtn" type="button" aria-label="Edit name">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+      </button>
+    </div>
     <div class="you-tag">Friend tag: <b id="youTag">—</b></div>
 
     <div style="margin-top: 22px;" class="stack">
@@ -54,8 +63,16 @@
     </div>
 
     <footer class="settings-row">
-      <button id="soundToggle">Sound: on</button>
-      <button id="hapticsToggle">Haptics: on</button>
+      <button class="setting-pill on" id="soundToggle" type="button">
+        <span class="setting-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M19 5a9 9 0 0 1 0 14"></path></svg></span>
+        <span class="setting-name">Sound</span>
+        <span class="switch"><span class="knob"></span></span>
+      </button>
+      <button class="setting-pill on" id="hapticsToggle" type="button">
+        <span class="setting-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="3"></rect><line x1="12" y1="18" x2="12" y2="18.01"></line></svg></span>
+        <span class="setting-name">Haptics</span>
+        <span class="switch"><span class="knob"></span></span>
+      </button>
     </footer>
   </section>
 
@@ -85,7 +102,7 @@
     <div class="section-label">How to play</div>
     <div class="card rules-card">
       <p>Each round, one of you is the <b class="pink">Searcher</b>, the other the <b class="cyan">Caller</b>. Roles swap every round.</p>
-      <p>The <b class="cyan">Caller</b> secretly picks a target number from the grid, then earns sabotage charges by solving quick puzzles — and spends them to mess with the Searcher's grid.</p>
+      <p>The <b class="cyan">Caller</b> secretly picks a target number from the grid, then earns sabotage charges by solving quick puzzles, and spends them to mess with the Searcher's grid.</p>
       <p>The <b class="pink">Searcher</b> must find and tap the target before the fuse fills.</p>
       <p>Find it in time → Searcher takes the round. Fuse fills first → Caller takes it.</p>
     </div>

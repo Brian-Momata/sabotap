@@ -38,7 +38,7 @@ export const handlers = {
   },
 
   friendRequest(msg) {
-    toast(`${msg.from.name} (${msg.from.tag}) wants to be friends — check your Friends list.`);
+    toast(`${msg.from.name} (${msg.from.tag}) wants to be friends. Check your Friends list.`);
   },
 
   invite(msg) {
@@ -150,7 +150,7 @@ export const handlers = {
     $('roundOverlayTitle').style.color = won ? 'var(--win)' : 'var(--danger)';
     $('roundOverlaySub').textContent = msg.reason === 'found'
       ? `The target ${msg.target} was found.`
-      : `The fuse ran out — ${msg.target} stayed hidden.`;
+      : `The fuse ran out. ${msg.target} stayed hidden.`;
     setTimeout(() => $('roundOverlay').classList.add('on'), msg.reason === 'found' ? 450 : 0);
     (won ? sfx.correct : sfx.wrong)();
     buzz(won ? [40, 40, 80] : [150]);
@@ -160,7 +160,7 @@ export const handlers = {
     $('roundOverlay').classList.remove('on');
     $('pairStage').textContent = `Stage ${msg.stage} of ${msg.stages}`;
     $('pairVs').textContent = `You vs ${msg.opponent.name}`;
-    $('pairInfo').textContent = `You: #${msg.you.rank} · ${msg.you.points} pts   —   ${msg.opponent.name}: #${msg.opponent.rank} · ${msg.opponent.points} pts`;
+    $('pairInfo').textContent = `You: #${msg.you.rank} · ${msg.you.points} pts   vs   ${msg.opponent.name}: #${msg.opponent.rank} · ${msg.opponent.points} pts`;
     startCountdown($('pairCount'), msg.startsInMs, { prefix: 'Starting in ', doneText: 'Starting…', seconds: true });
     $('pairOverlay').classList.add('on');
     sfx.charge();

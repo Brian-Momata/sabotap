@@ -31,7 +31,7 @@ function flashFeedback(kind, name, detail) {
   const banner = $('sabBanner');
   banner.style.setProperty('--banner-bg', pink ? 'var(--accent-searcher)' : 'var(--accent-caller)');
   banner.style.setProperty('--banner-fg', pink ? 'var(--on-searcher)' : 'var(--on-caller)');
-  banner.textContent = `${SAB_ICON[kind] || '⚡'} ${name.toUpperCase()} — ${detail}`;
+  banner.textContent = `${SAB_ICON[kind] || '⚡'} ${name.toUpperCase()} · ${detail}`;
   banner.classList.add('on');
   effectTimers.push(setTimeout(() => banner.classList.remove('on'), 1600));
   sfx.sabotage();
