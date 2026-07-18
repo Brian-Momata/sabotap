@@ -18,21 +18,38 @@ function rtcConfig() {
   return { iceServers: (state.config && state.config.iceServers) || [{ urls: 'stun:stun.l.google.com:19302' }] };
 }
 
+// The mic is held only while unmuted: releasing the capture session when muted
+// lets the phone give the mic (and call audio route) back to other apps, e.g.
+// an ongoing WhatsApp call. Hearing peers never depends on having the mic.
+async function startMic() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  voice.stream = stream;
+  const track = stream.getAudioTracks()[0];
+  voice.peers.forEach(entry => { entry.sender.replaceTrack(track).catch(() => {}); });
+}
+
+function stopMic() {
+  if (!voice.stream) return;
+  voice.stream.getTracks().forEach(tr => tr.stop());
+  voice.stream = null;
+  voice.peers.forEach(entry => { entry.sender.replaceTrack(null).catch(() => {}); });
+}
+
 export async function joinVoice() {
   if (voice.joined) return;
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-  } catch {
-    toast('Microphone blocked. Allow mic access to use voice chat.');
-    return;
-  }
-  voice.stream = stream;
   voice.joined = true;
   voice.muted = false;
+  try {
+    await startMic();
+  } catch {
+    // No mic is no reason not to listen: join muted so peers see the state.
+    voice.muted = true;
+    toast('Joined listen-only. Allow mic access to talk.');
+  }
   send({ t: 'voiceJoin' });
+  if (voice.muted) send({ t: 'voiceMute', muted: true });
   renderVoiceDock();
 }
 
@@ -54,10 +71,20 @@ export function leaveVoice(notify = true) {
   if (state.phase === 'lobby' && state.room) renderLobby();
 }
 
-export function toggleVoiceMute() {
+export async function toggleVoiceMute() {
   if (!voice.joined) return;
-  voice.muted = !voice.muted;
-  voice.stream.getAudioTracks().forEach(tr => { tr.enabled = !voice.muted; });
+  if (voice.muted) {
+    try {
+      await startMic();
+    } catch {
+      toast('Microphone blocked. Allow mic access to talk.');
+      return;
+    }
+    voice.muted = false;
+  } else {
+    stopMic();
+    voice.muted = true;
+  }
   send({ t: 'voiceMute', muted: voice.muted });
   renderVoiceDock();
 }
@@ -70,9 +97,14 @@ export function voicePeer(id, initiator) {
   audio.autoplay = true;
   audio.playsInline = true;
   document.body.append(audio);
-  entry = { pc, audio, pendingIce: [] };
+  // One sendrecv transceiver per pair, created before any SDP exchange: the
+  // answering side's transceiver is reused for the incoming m-line (JSEP), and
+  // replaceTrack on its sender swaps the mic in/out without renegotiation.
+  // This is what lets a mic-less (muted/blocked) member still hear peers.
+  const sender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
+  entry = { pc, audio, sender, pendingIce: [] };
   voice.peers.set(id, entry);
-  voice.stream.getTracks().forEach(tr => pc.addTrack(tr, voice.stream));
+  if (voice.stream) sender.replaceTrack(voice.stream.getAudioTracks()[0]).catch(() => {});
   pc.ontrack = e => {
     audio.srcObject = e.streams[0];
     // Autoplay can be blocked when the track arrives outside a user gesture
