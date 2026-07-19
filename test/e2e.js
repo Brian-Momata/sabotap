@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = 3111;
@@ -116,9 +117,9 @@ async function playRoundAsSearcherWin(clients, seats, roundMsgAll) {
   return end;
 }
 
-async function startServer(cwd) {
+async function startServer(cwd, extraEnv = {}) {
   const proc = spawn('node', [path.join(__dirname, '..', 'server.js')], {
-    env: ENV,
+    env: { ...ENV, ...extraEnv },
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -134,6 +135,7 @@ async function startServer(cwd) {
 async function main() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sabotap-test-'));
   let server = await startServer(dataDir);
+  let proxied = null; // second server for the TRUST_PROXY / XFF section
 
   // Graceful restart against the same store/rooms files, as a redeploy would.
   async function restartServer() {
@@ -833,6 +835,155 @@ async function main() {
     assert(limited, 'room-code guessing is rate limited per IP');
     RL.close();
 
+    // --- matchEnd resilience: a decided match survives a leaver in the gap,
+    // the results screen accepts newcomers, and drops there get grace ---
+    const F1 = new Client('F1');
+    const F2 = new Client('F2');
+    await F1.connect();
+    await F2.connect();
+    const f1Id = 'test_f1_' + Date.now();
+    const f2Id = 'test_f2_' + Date.now();
+    F1.send({ t: 'hello', playerId: f1Id, name: 'Fay' });
+    F2.send({ t: 'hello', playerId: f2Id, name: 'Gus' });
+    await F1.waitFor('hello');
+    await F2.waitFor('hello');
+    F1.send({ t: 'create' });
+    const froom = await F1.waitFor('room');
+    F2.send({ t: 'join', code: froom.code });
+    await F1.waitFor('room', m => m.players.length === 2);
+    F1.send({ t: 'settings', roundsToWin: 2 });
+    await F2.waitFor('room', m => m.settings.roundsToWin === 2);
+    F2.send({ t: 'ready', ready: true });
+    await F1.waitFor('room', m => m.players.some(p => p.seat === 1 && p.ready));
+    F1.send({ t: 'start' });
+    // Searcher wins every round; roles alternate, so first-to-2 runs 3 rounds
+    // and the round-3 caller is the loser.
+    let fEnd = null;
+    let fLoser = null;
+    let fWinner = null;
+    for (let r = 1; r <= 3; r++) {
+      const fa = await F1.waitFor('roundStart', m => m.round === r);
+      await F2.waitFor('roundStart', m => m.round === r);
+      const caller = fa.callerSeat === 0 ? F1 : F2;
+      const searcher = caller === F1 ? F2 : F1;
+      caller.send({ t: 'pick', index: 0 });
+      const live = await searcher.waitFor('live');
+      await caller.waitFor('live');
+      searcher.send({ t: 'tap', index: live.grid.indexOf(live.target) });
+      fEnd = await searcher.waitFor('roundEnd', m => m.history.length === r);
+      await caller.waitFor('roundEnd', m => m.history.length === r);
+      fLoser = caller;
+      fWinner = searcher;
+    }
+    assert(fEnd.matchOver === true, 'third round decides the first-to-2 match');
+    // The loser vanishes inside the inter-round gap; grace expiry must publish
+    // the decided result, not dissolve the match back to the lobby.
+    fLoser.close();
+    const fMatch = await fWinner.waitFor('matchEnd', () => true, 8000);
+    assert(fMatch.score[fMatch.winnerSeat] === 2 && fMatch.score.reduce((s, x) => s + x, 0) === 3,
+      'a decided match publishes its result even when the loser vanishes in the gap');
+    const fSolo = await fWinner.waitFor('room', m => m.players.length === 1, 8000);
+    assert(fSolo.phase === 'matchEnd', 'the room lands on matchEnd, not a dissolved lobby');
+
+    // A newcomer can take the empty seat while the room sits on results.
+    const F3 = new Client('F3');
+    await F3.connect();
+    F3.send({ t: 'hello', playerId: 'test_f3_' + Date.now(), name: 'Ivo' });
+    await F3.waitFor('hello');
+    F3.send({ t: 'join', code: froom.code });
+    const fJoin = await F3.waitFor('room');
+    assert(fJoin.phase === 'matchEnd' && fJoin.players.length === 2,
+      'a room on the results screen accepts a new player');
+
+    // Results-screen disconnects keep their seat through the grace window.
+    const fWinnerId = fWinner === F1 ? f1Id : f2Id;
+    fWinner.close();
+    const fDrop = await F3.waitFor('room', m => m.players.some(p => !p.connected));
+    assert(fDrop.players.length === 2, 'a results-screen disconnect keeps the seat during grace');
+    F3.send({ t: 'start' });
+    const fAway = await F3.waitFor('error');
+    assert(/reconnecting/i.test(fAway.msg), 'start is blocked while a seat is in reconnect grace');
+    const WB = new Client('WB');
+    await WB.connect();
+    WB.send({ t: 'hello', playerId: fWinnerId, name: 'Fay' });
+    await WB.waitFor('hello');
+    const fRes = await WB.waitFor('resume');
+    assert(fRes.phase === 'matchEnd', 'reconnect during results resumes into the room');
+    const fAgain = await WB.waitFor('matchEnd');
+    assert(fAgain.winnerSeat === fMatch.winnerSeat, 'the results screen is replayed to the returner');
+    // A player who never returns still expires after grace.
+    F3.close();
+    const fGone = await WB.waitFor('room', m => m.players.length === 1, 8000);
+    assert(fGone.phase === 'matchEnd', 'an unreturned results-screen player expires after grace');
+    WB.close(); F1.close(); F2.close();
+
+    // --- identity hygiene: re-hello under a new id releases the old one ---
+    const health = () => new Promise((resolve, reject) => {
+      http.get(`http://localhost:${PORT}/health`, res => {
+        let body = '';
+        res.on('data', d => { body += d; });
+        res.on('end', () => resolve(JSON.parse(body)));
+      }).on('error', reject);
+    });
+    const PH = new Client('PH');
+    await PH.connect();
+    PH.send({ t: 'hello', playerId: 'test_ph1_' + Date.now(), name: 'One' });
+    await PH.waitFor('hello');
+    await sleep(300); // let earlier closed sockets finish leaving the presence map
+    const h1 = await health();
+    PH.send({ t: 'hello', playerId: 'test_ph2_' + Date.now(), name: 'Two' });
+    await PH.waitFor('hello', m => m.you.name === 'Two');
+    const h2 = await health();
+    assert(h2.online === h1.online, 're-hello under a new id releases the old identity');
+
+    // --- dispatch hygiene: prototype names are not routable messages ---
+    PH.send({ t: 'constructor' });
+    const uk1 = await PH.waitFor('error');
+    assert(/unknown message/i.test(uk1.msg), "'constructor' is rejected as unknown, not silently executed");
+    PH.send({ t: '__proto__' });
+    const uk2 = await PH.waitFor('error');
+    assert(/unknown message/i.test(uk2.msg), "'__proto__' cannot reach inherited handler members");
+    PH.close();
+
+    // --- rate limits: spoofed X-Forwarded-For cannot mint fresh budgets ---
+    // A trusted proxy APPENDS the real client IP, so the last XFF entry is the
+    // only one the server may believe; everything earlier is attacker-written.
+    const PORT2 = PORT + 1;
+    proxied = await startServer(dataDir, {
+      PORT: String(PORT2),
+      TRUST_PROXY: '1',
+      WS_FAIL_BURST: '2',
+      WS_FAIL_PER_SEC: '0',
+      STORE_FILE: path.join(os.tmpdir(), `sabotap-test-store2-${Date.now()}.json`),
+      ROOMS_FILE: path.join(os.tmpdir(), `sabotap-test-rooms2-${Date.now()}.json`),
+    });
+    let xffSeq = 0;
+    async function joinMissVia(xff) {
+      const sock = new WebSocket(`ws://localhost:${PORT2}`, { headers: { 'x-forwarded-for': xff } });
+      await new Promise((res, rej) => { sock.on('open', res); sock.on('error', rej); });
+      const errMsg = new Promise(resolve => {
+        sock.on('message', raw => {
+          const m = JSON.parse(raw);
+          if (m.t === 'error') resolve(m.msg);
+        });
+      });
+      xffSeq += 1;
+      sock.send(JSON.stringify({ t: 'hello', playerId: `test_xff${xffSeq}_` + Date.now(), name: 'Spoof' }));
+      sock.send(JSON.stringify({ t: 'join', code: 'ZZZ-11' }));
+      const msg = await errMsg;
+      sock.close();
+      return msg;
+    }
+    const xm1 = await joinMissVia('6.6.6.1, 9.9.9.9');
+    const xm2 = await joinMissVia('6.6.6.2, 9.9.9.9');
+    const xm3 = await joinMissVia('6.6.6.3, 9.9.9.9');
+    assert(/not found/i.test(xm1) && /not found/i.test(xm2) && /too many/i.test(xm3),
+      'rotating the client-written XFF entry cannot mint fresh failure budgets');
+    const xm4 = await joinMissVia('6.6.6.4, 8.8.8.8');
+    assert(/not found/i.test(xm4), 'a different proxy-appended client IP gets its own budget');
+    proxied.kill();
+    proxied = null;
+
     // --- board rotation: cycles in order within a match, continues across
     // matches (round is match-local, so without the room-owned offset every
     // match replayed the head of the list and never reached the later boards)
@@ -901,6 +1052,7 @@ async function main() {
   } finally {
     A.close(); B.close();
     server.kill();
+    if (proxied) proxied.kill();
   }
 }
 

@@ -48,9 +48,10 @@ const wss = new WebSocketServer({ server, maxPayload: CONFIG.net.maxPayloadBytes
 const guards = new EdgeGuards(CONFIG.net);
 
 function destroyRoom(code) {
-  const room = rooms.get(code);
-  if (room) room.players.forEach(p => roomOf.delete(p.id));
   rooms.delete(code);
+  // Sweep every mapping to this room, not just current seats — players removed
+  // earlier (grace expiry) may still map here and would otherwise leak forever.
+  for (const [pid, c] of roomOf) if (c === code) roomOf.delete(pid);
   persistence.remove(code);
 }
 
@@ -146,6 +147,13 @@ wss.on('connection', (ws, req) => {
         send(ws, { t: 'error', msg: 'That profile is linked to another device. Restore it with a link or recovery code.' });
         if (authFails >= CONFIG.identity.claimMaxAttempts) { try { ws.close(1008, 'auth failed'); } catch {} }
         return;
+      }
+      // A repeat hello that switches identity must release the old one, or the
+      // previous id lingers "online" on this socket forever (phantom presence).
+      if (me && me.id !== id) {
+        leaveRoom(me.id);
+        if (social.online.get(me.id) === ws) social.online.delete(me.id);
+        notifyPresence(me.id);
       }
       // A second connection for the same player replaces the first.
       const prev = social.online.get(id);
@@ -355,7 +363,9 @@ wss.on('connection', (ws, req) => {
     if (!me && msg.t !== 'hello' && msg.t !== 'claim' && msg.t !== 'ping') {
       return send(ws, { t: 'error', msg: 'Say hello first.' });
     }
-    const handler = handlers[msg.t];
+    // Own-property lookup only: 'constructor', '__proto__' and friends must
+    // not resolve to inherited members of the handler table.
+    const handler = Object.hasOwn(handlers, msg.t) ? handlers[msg.t] : null;
     if (!handler) return send(ws, { t: 'error', msg: `Unknown message: ${msg.t}` });
     try {
       handler(msg);

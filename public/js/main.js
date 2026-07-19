@@ -128,7 +128,8 @@ if (/^[A-Z]{3,4}-\d{2}$/.test(hashCode)) {
 
 show('s-home');
 connect({
-  onMessage: msg => { const h = handlers[msg.t]; if (h) h(msg); },
+  // Own-property lookup so 'constructor' and co. can't hit inherited members.
+  onMessage: msg => { const h = Object.hasOwn(handlers, msg.t) ? handlers[msg.t] : null; if (h) h(msg); },
   onClose: () => leaveVoice(false), // server already dropped us from voice on disconnect
 });
 

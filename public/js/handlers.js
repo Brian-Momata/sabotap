@@ -102,9 +102,13 @@ export const handlers = {
   },
 
   room(msg) {
+    // Joining from home can land in a room sitting on a results screen
+    // (matchEnd/tEnd) — without a screen switch the joiner would stay stranded
+    // on home while holding a seat.
+    const fresh = state.phase === 'home';
     state.room = msg;
     state.seat = msg.you;
-    if (msg.phase === 'lobby') {
+    if (msg.phase === 'lobby' || fresh) {
       state.phase = 'lobby';
       $('pauseOverlay').classList.remove('on');
       $('roundOverlay').classList.remove('on');
