@@ -71,6 +71,7 @@ export const handlers = {
   claimed(msg) {
     // Adopt the restored identity: same shape as hello, plus the new credential.
     LS.playerId = msg.you.id;
+    if (msg.secret) LS.secret = msg.secret;
     handlers.hello(msg);
     $('claimInput').value = '';
     toast(`Profile restored. You are ${msg.you.name} (${msg.you.tag}).`);

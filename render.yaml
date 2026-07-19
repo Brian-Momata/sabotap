@@ -17,3 +17,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Render's proxy sets X-Forwarded-For; without this the per-IP rate
+      # limits in lib/limits.js would key every client on the proxy's address.
+      - key: TRUST_PROXY
+        value: "1"

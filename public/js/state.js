@@ -2,6 +2,8 @@
 
 export const LS = window.localStorage;
 if (!LS.playerId) LS.playerId = 'p_' + crypto.randomUUID();
+// The secret is the credential; playerId is public (friends see it in payloads).
+if (!LS.secret) LS.secret = 's_' + crypto.randomUUID();
 
 export const prefs = {
   get sound() { return LS.sound !== 'off'; },

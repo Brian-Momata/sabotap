@@ -25,6 +25,7 @@ const ENV = {
   ROOMS_FILE: path.join(os.tmpdir(), `sabotap-test-rooms-${Date.now()}.json`),
   ROOM_AUTOSAVE_MS: '300',
   ROOM_SAVE_DEBOUNCE_MS: '50',
+  WS_HEARTBEAT_MS: '150',
 };
 
 let passed = 0;
@@ -358,6 +359,7 @@ async function main() {
     Y.send({ t: 'claim', code: lc.code });
     const claimed = await Y.waitFor('claimed');
     assert(claimed.you.id === helloX.you.id && claimed.you.tag === helloX.you.tag, 'link-code claim adopts the profile');
+    assert(typeof claimed.secret === 'string' && claimed.secret.length >= 16, 'claim hands the device secret to the new device');
     Y.send({ t: 'claim', code: lc.code });
     const reuse = await Y.waitFor('error');
     assert(/invalid|expired/i.test(reuse.msg), 'link code is single-use');
@@ -369,6 +371,7 @@ async function main() {
     Z.send({ t: 'claim', code: rc1.code.toLowerCase() });
     const claimed2 = await Z.waitFor('claimed');
     assert(claimed2.you.id === helloX.you.id, 'recovery-code claim restores the profile (case-insensitive)');
+    assert(claimed2.secret === claimed.secret, 'linked devices share one stored credential');
 
     const W = new Client('W');
     await W.connect();
@@ -393,6 +396,33 @@ async function main() {
     const expired = await Q.waitFor('error');
     assert(/invalid|expired/i.test(expired.msg), 'expired link code is rejected');
     X.close(); Y.close(); Z.close(); W.close(); Q.close();
+
+    // --- identity: a bound device secret blocks impersonation ---
+    const N1 = new Client('N1');
+    await N1.connect();
+    const nId = 'test_n_' + Date.now();
+    N1.send({ t: 'hello', playerId: nId, secret: 'n-device-secret', name: 'Nia' });
+    const helloN = await N1.waitFor('hello');
+    assert(helloN.you.id === nId, 'hello with a device secret succeeds');
+    const N2 = new Client('N2');
+    await N2.connect();
+    const n2Closed = new Promise(r => N2.ws.on('close', r));
+    N2.send({ t: 'hello', playerId: nId, secret: 'wrong-secret', name: 'Evil' });
+    await N2.waitFor('error', m => /another device/i.test(m.msg));
+    assert(true, 'a wrong secret cannot take over a profile');
+    N2.send({ t: 'hello', playerId: nId, name: 'Evil' }); // no secret at all
+    await N2.waitFor('error', m => /another device/i.test(m.msg));
+    await n2Closed; // CLAIM_MAX_ATTEMPTS=2 → socket closes after the second failure
+    assert(true, 'repeated auth failures close the socket');
+    N1.send({ t: 'linkCodeGet' });
+    const nlc = await N1.waitFor('linkCode');
+    assert(nlc.code.length === 6, 'legit session survives impersonation attempts');
+    const N3 = new Client('N3');
+    await N3.connect();
+    N3.send({ t: 'hello', playerId: nId, secret: 'n-device-secret', name: 'Nia' });
+    const helloN3 = await N3.waitFor('hello');
+    assert(helloN3.you.id === nId, 'the matching secret signs in from a second device');
+    N1.close(); N2.close(); N3.close();
 
     // --- identity: claiming mid-match resumes the seat on the new device ---
     const M1 = new Client('M1');
@@ -508,6 +538,7 @@ async function main() {
     const hv1 = await V1.waitFor('hello');
     const hv2 = await V2.waitFor('hello');
     assert(Array.isArray(hv1.config.iceServers) && hv1.config.iceServers.length > 0, 'hello ships ICE servers');
+    assert(hv1.config.voiceMaxBps > 0, 'hello ships the per-peer voice bitrate cap');
     V1.send({ t: 'create' });
     const vroom = await V1.waitFor('room');
     V2.send({ t: 'join', code: vroom.code });
@@ -785,6 +816,84 @@ async function main() {
     assert(kpair2.stage === 2, 'restart: the schedule advances to the next stage after revival');
     KB.forEach(c => c.close());
     K.forEach(c => c.close());
+
+    // --- rate limits: room-code guessing exhausts the per-IP failure budget ---
+    const RL = new Client('RL');
+    await RL.connect();
+    RL.send({ t: 'hello', playerId: 'test_rl_' + Date.now(), name: 'Rob' });
+    await RL.waitFor('hello');
+    let limited = false;
+    for (let i = 0; i < 40 && !limited; i++) {
+      RL.send({ t: 'join', code: `ZZZ-${10 + (i % 90)}` }); // ZZZ is never a real code word
+      const e = await RL.waitFor('error');
+      if (/too many/i.test(e.msg)) limited = true;
+    }
+    assert(limited, 'room-code guessing is rate limited per IP');
+    RL.close();
+
+    // --- board rotation: cycles in order within a match, continues across
+    // matches (round is match-local, so without the room-owned offset every
+    // match replayed the head of the list and never reached the later boards)
+    const ORDER = ['standard', 'mirrors', 'blackout', 'drift', 'glyphs'];
+    const RO1 = new Client('RO1');
+    const RO2 = new Client('RO2');
+    await RO1.connect();
+    await RO2.connect();
+    RO1.send({ t: 'hello', playerId: 'test_r1_' + Date.now(), name: 'Ryu' });
+    RO2.send({ t: 'hello', playerId: 'test_r2_' + Date.now(), name: 'Rin' });
+    await RO1.waitFor('hello');
+    await RO2.waitFor('hello');
+    RO1.send({ t: 'create' });
+    const rotRoom = await RO1.waitFor('room');
+    RO2.send({ t: 'join', code: rotRoom.code });
+    await RO1.waitFor('room', m => m.players.length === 2);
+    RO1.send({ t: 'settings', board: 'rotation', roundsToWin: 2 });
+    await RO2.waitFor('room', m => m.settings.board === 'rotation');
+    RO2.send({ t: 'ready', ready: true });
+    await RO1.waitFor('room', m => m.players.every(p => p.ready));
+    RO1.send({ t: 'start' });
+    const rotMsgs = async n => ({
+      0: await RO1.waitFor('roundStart', m => m.round === n),
+      1: await RO2.waitFor('roundStart', m => m.round === n),
+    });
+    // Searcher wins every round; the caller alternates, so a first-to-2 match
+    // runs exactly 3 rounds — boards must be the cycle head in order.
+    for (let n = 1; n <= 3; n++) {
+      const msgs = await rotMsgs(n);
+      assert(msgs[0].board.key === ORDER[n - 1] && msgs[1].board.key === ORDER[n - 1],
+        `rotation round ${n} plays ${ORDER[n - 1]}`);
+      await playRoundAsSearcherWin([RO1, RO2], [0, 1], msgs);
+    }
+    await RO1.waitFor('matchEnd');
+    await RO2.waitFor('matchEnd');
+    RO1.send({ t: 'rematch' });
+    RO2.send({ t: 'rematch' });
+    const rem = await rotMsgs(1);
+    assert(rem[0].board.key === 'drift', 'rematch continues the rotation where the last match stopped');
+    RO1.close();
+    RO2.close();
+
+    // --- liveness: app-level ping/pong and zombie termination ---
+    const HB = new Client('HB');
+    await HB.connect();
+    HB.send({ t: 'ping' }); // pre-hello: the watchdog may fire before hello lands
+    await HB.waitFor('pong');
+    assert(true, 'app-level ping answers pong, even before hello');
+    HB.send({ t: 'hello', playerId: 'test_hb_' + Date.now(), name: 'Hana' });
+    const hbHello = await HB.waitFor('hello');
+    assert(hbHello.config.pingMs > 0 && hbHello.config.staleMs > 0, 'hello ships client liveness timings');
+    HB.close();
+
+    // A client that never answers protocol pings (a half-open socket in real
+    // life) must be terminated by the server heartbeat, not linger connected.
+    const zombie = new WebSocket(`ws://localhost:${PORT}`, { autoPong: false });
+    await new Promise((resolve, reject) => { zombie.on('open', resolve); zombie.on('error', reject); });
+    zombie.on('error', () => {});
+    const reaped = await new Promise(resolve => {
+      const timer = setTimeout(() => resolve(false), 2500);
+      zombie.on('close', () => { clearTimeout(timer); resolve(true); });
+    });
+    assert(reaped, 'a socket that stops answering pings is terminated');
 
     console.log(`\nALL PASSED (${passed} assertions)`);
   } finally {

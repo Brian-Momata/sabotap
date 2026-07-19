@@ -19,12 +19,28 @@ function rtcConfig() {
   return { iceServers: (state.config && state.config.iceServers) || [{ urls: 'stun:stun.l.google.com:19302' }] };
 }
 
+// Mesh audio means each phone uploads its mic once per peer: in a full 8-player
+// waiting channel that is 7 parallel encodes, enough to squeeze the game
+// traffic on weak uplinks. Capping the per-link bitrate keeps the whole mesh
+// inside what one voice call would cost. Only works post-negotiation, hence
+// the connectionstatechange hook.
+function capSenderBitrate(sender) {
+  const maxBitrate = state.config && state.config.voiceMaxBps;
+  if (!maxBitrate) return; // older server: leave the browser default
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = maxBitrate;
+    sender.setParameters(params).catch(() => {});
+  } catch {}
+}
+
 // The mic is held only while unmuted: releasing the capture session when muted
 // lets the phone give the mic (and call audio route) back to other apps, e.g.
 // an ongoing WhatsApp call. Hearing peers never depends on having the mic.
 async function startMic() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
   });
   voice.stream = stream;
   if (state.you) attachMeter(state.you.id, stream);
@@ -109,9 +125,13 @@ export function voicePeer(id, initiator) {
   entry = { pc, audio, sender, pendingIce: [] };
   voice.peers.set(id, entry);
   if (voice.stream) sender.replaceTrack(voice.stream.getAudioTracks()[0]).catch(() => {});
+  pc.onconnectionstatechange = () => { if (pc.connectionState === 'connected') capSenderBitrate(sender); };
   pc.ontrack = e => {
-    audio.srcObject = e.streams[0];
-    attachMeter(id, e.streams[0]);
+    // addTransceiver + replaceTrack sends no stream association (no a=msid in
+    // the SDP), so e.streams is empty — wrap the bare track or nothing plays.
+    const stream = e.streams[0] || new MediaStream([e.track]);
+    audio.srcObject = stream;
+    attachMeter(id, stream);
     // Autoplay can be blocked when the track arrives outside a user gesture
     // (e.g. someone joins voice long after we did) — retry on the next tap.
     audio.play().catch(() => {

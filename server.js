@@ -10,6 +10,7 @@ const Store = require('./lib/store');
 const Social = require('./lib/social');
 const Identity = require('./lib/identity');
 const { clientConfig } = require('./lib/client-config');
+const { EdgeGuards } = require('./lib/limits');
 const { Room, makeRoomCode, RoomPersistence } = require('./lib/game');
 
 const store = new Store(process.env.STORE_FILE || path.join(__dirname, 'data', 'store.json'));
@@ -43,7 +44,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size, online: social.online.size }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: CONFIG.net.maxPayloadBytes });
+const guards = new EdgeGuards(CONFIG.net);
 
 function destroyRoom(code) {
   const room = rooms.get(code);
@@ -102,18 +104,53 @@ function leaveRoom(playerId) {
   if (room) room.removePlayer(playerId);
 }
 
-wss.on('connection', ws => {
+// Half-open sockets (phone sleep, network switch) never fire 'close' on their
+// own: without this sweep a vanished player keeps their seat as "connected"
+// forever and their opponents play against dead air. Termination funnels into
+// the normal 'close' → grace → forfeit path.
+const heartbeat = setInterval(() => {
+  for (const client of wss.clients) {
+    if (client.isAlive === false) { client.terminate(); continue; }
+    client.isAlive = false;
+    if (client.readyState === 1) client.ping();
+  }
+}, CONFIG.net.heartbeatMs);
+if (heartbeat.unref) heartbeat.unref();
+
+wss.on('connection', (ws, req) => {
+  if (!guards.originAllowed(req)) return ws.close(1008, 'origin not allowed');
+  const ip = guards.ipOf(req);
+  if (!guards.takeConnection(ip)) return ws.close(1013, 'too many connections');
+  const allowMessage = guards.messageBucket();
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   let me = null; // profile after hello
   let claimFails = 0;
+  let authFails = 0;
 
   const handlers = {
+    // App-level liveness probe: browsers can't see ws protocol pings, so the
+    // client watchdog sends this and times out on silence (see public/js/net.js).
+    ping() {
+      send(ws, { t: 'pong' });
+    },
+
     hello(msg) {
       const id = String(msg.playerId || '').slice(0, 64);
       if (!id) return send(ws, { t: 'error', msg: 'hello requires playerId' });
+      const profile = social.register(id, msg.name, String(msg.secret || '').slice(0, 128));
+      if (!profile) {
+        // Wrong device secret. Never kick the legit session, and cap guessing.
+        authFails += 1;
+        send(ws, { t: 'error', msg: 'That profile is linked to another device. Restore it with a link or recovery code.' });
+        if (authFails >= CONFIG.identity.claimMaxAttempts) { try { ws.close(1008, 'auth failed'); } catch {} }
+        return;
+      }
       // A second connection for the same player replaces the first.
       const prev = social.online.get(id);
       if (prev && prev !== ws) { try { prev.close(); } catch {} }
-      me = social.register(id, msg.name);
+      me = profile;
       social.online.set(id, ws);
       send(ws, helloPayload('hello', me));
       notifyPresence(id);
@@ -134,25 +171,35 @@ wss.on('connection', ws => {
       if (claimFails >= CONFIG.identity.claimMaxAttempts) {
         return send(ws, { t: 'error', msg: 'Too many attempts. Reconnect to try again.' });
       }
+      // Per-IP budget backstops the per-connection cap, which resets on reconnect.
+      if (!guards.spendFail(ip)) {
+        return send(ws, { t: 'error', msg: 'Too many attempts. Try again later.' });
+      }
       const targetId = identity.resolve(msg.code);
       if (!targetId) {
         claimFails += 1;
         return send(ws, { t: 'error', msg: 'Invalid or expired code.' });
       }
-      if (targetId === me.id) return send(ws, { t: 'error', msg: 'That code points at this profile already.' });
+      if (me && targetId === me.id) return send(ws, { t: 'error', msg: 'That code points at this profile already.' });
+      const adopted = social.adopt(targetId);
+      if (!adopted) return send(ws, { t: 'error', msg: 'Invalid or expired code.' });
       // Adopt the claimed identity on this socket; the current (throwaway)
-      // profile is dropped unless it already has friendships.
+      // profile is dropped unless it already has friendships. me can be null
+      // here: a device whose hello was rejected recovers through claim.
       const prev = social.online.get(targetId);
       if (prev && prev !== ws) { try { prev.close(); } catch {} }
-      const oldId = me.id;
-      leaveRoom(oldId);
-      social.online.delete(oldId);
-      social.discardIfUnused(oldId);
-      me = social.register(targetId, '');
+      const oldId = me ? me.id : null;
+      if (oldId) {
+        leaveRoom(oldId);
+        social.online.delete(oldId);
+        social.discardIfUnused(oldId);
+      }
+      me = adopted;
       social.online.set(targetId, ws);
-      notifyPresence(oldId);
+      if (oldId) notifyPresence(oldId);
       notifyPresence(targetId);
-      send(ws, helloPayload('claimed', me));
+      // The stored secret rides along so this device authenticates next hello.
+      send(ws, { ...helloPayload('claimed', me), secret: social.ensureSecret(targetId) });
       const room = roomFor(targetId);
       if (room) room.reconnect(targetId, ws);
     },
@@ -174,7 +221,13 @@ wss.on('connection', ws => {
     join(msg) {
       const code = String(msg.code || '').trim().toUpperCase();
       const room = rooms.get(code);
-      if (!room) return send(ws, { t: 'error', msg: `Room ${code || '?'} not found.` });
+      if (!room) {
+        // Misses spend the per-IP failure budget — the code space is small
+        // enough to enumerate, so guessing has to be expensive.
+        return send(ws, { t: 'error', msg: guards.spendFail(ip)
+          ? `Room ${code || '?'} not found.`
+          : 'Too many attempts. Try again later.' });
+      }
       if (roomOf.get(me.id) === code && room.seatOf(me.id) !== -1) return room.reconnect(me.id, ws);
       leaveRoom(me.id);
       const res = room.addPlayer({ id: me.id, name: me.name, tag: me.tag, ws });
@@ -292,10 +345,16 @@ wss.on('connection', ws => {
   };
 
   ws.on('message', raw => {
+    if (!allowMessage()) return; // flood: drop silently, never amplify with replies
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (typeof msg !== 'object' || msg === null) return;
-    if (msg.t !== 'hello' && !me) return send(ws, { t: 'error', msg: 'Say hello first.' });
+    // claim is allowed pre-hello so a device that fails secret auth can still
+    // recover its profile with a link/recovery code; ping so the liveness
+    // watchdog never trips an error toast.
+    if (!me && msg.t !== 'hello' && msg.t !== 'claim' && msg.t !== 'ping') {
+      return send(ws, { t: 'error', msg: 'Say hello first.' });
+    }
     const handler = handlers[msg.t];
     if (!handler) return send(ws, { t: 'error', msg: `Unknown message: ${msg.t}` });
     try {
@@ -322,11 +381,12 @@ wss.on('connection', ws => {
   });
 });
 
+social.pruneStale(CONFIG.identity.staleProfileMs);
 persistence.restore();
 
 server.listen(CONFIG.port, () => {
   console.log(`${CONFIG.name} listening on http://localhost:${CONFIG.port}`);
 });
 
-process.on('SIGINT', () => { store.flush(); persistence.flushAll(); process.exit(0); });
-process.on('SIGTERM', () => { store.flush(); persistence.flushAll(); process.exit(0); });
+process.on('SIGINT', () => { guards.destroy(); store.flush(); persistence.flushAll(); process.exit(0); });
+process.on('SIGTERM', () => { guards.destroy(); store.flush(); persistence.flushAll(); process.exit(0); });

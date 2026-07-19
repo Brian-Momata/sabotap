@@ -2,10 +2,13 @@
 
 import { $ } from './state.js';
 import { renderVoiceDock } from './voice.js';
+import { setWakeLock } from './wake-lock.js';
 
 export function show(screen) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
   $(screen).classList.add('on');
+  // Any in-room screen holds the wake lock; home releases it.
+  setWakeLock(screen !== 's-home');
   renderVoiceDock();
 }
 
