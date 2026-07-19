@@ -13,7 +13,7 @@ import {
 import { handleSabotage, applySwap, resetEffects } from './sabotage-fx.js';
 import { startCountdown, renderStandings, TWAIT_STATUS } from './tournament-view.js';
 import { renderResults } from './results.js';
-import { voice, voiceAllowed, voicePeer, syncVoicePeers, leaveVoice, renderVoiceDock } from './voice.js';
+import { voice, voiceAllowed, voicePeer, syncVoicePeers, ensureVoice, leaveVoice, renderVoiceDock } from './voice.js';
 import { showLinkCode, showRecoveryCode } from './identity-ui.js';
 
 function hideInvite() {
@@ -117,10 +117,12 @@ export const handlers = {
     } else {
       renderLobby();
     }
+    ensureVoice();
   },
 
   left() {
     leaveVoice(false);
+    voice.optedOut = false; // a fresh room starts hearing again by default
     state.room = null;
     state.phase = 'home';
     show('s-home');
@@ -287,6 +289,7 @@ export const handlers = {
       show('s-lobby');
     }
     // phase 'playing' without a match: a tWaiting follow-up is on its way
+    ensureVoice();
   },
 
   voiceState(msg) {

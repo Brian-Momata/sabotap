@@ -282,9 +282,9 @@ wss.on('connection', (ws, req) => {
       if (room) room.rematch(room.seatOf(me.id));
     },
 
-    voiceJoin() {
+    voiceJoin(msg) {
       const room = roomFor(me.id);
-      if (room) room.voiceJoin(room.seatOf(me.id));
+      if (room) room.voiceJoin(room.seatOf(me.id), !!msg.muted);
     },
 
     voiceLeave() {

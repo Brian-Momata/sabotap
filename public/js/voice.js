@@ -6,7 +6,7 @@ import { toast } from './ui.js';
 import { renderLobby } from './lobby.js';
 import { attachMeter, detachMeter, stopMeters } from './voice-meter.js';
 
-export const voice = { joined: false, muted: false, stream: null, peers: new Map(), members: [], allowed: null };
+export const voice = { joined: false, muted: false, optedOut: false, stream: null, peers: new Map(), members: [], allowed: null };
 window.voice = voice; // exposed for automated tests
 
 // The server scopes who may talk to whom (everyone in the lobby, your match
@@ -56,25 +56,33 @@ function stopMic() {
   voice.peers.forEach(entry => { entry.sender.replaceTrack(null).catch(() => {}); });
 }
 
-export async function joinVoice() {
+// Being in the room means hearing the room: joining is listen-only (no mic
+// permission, no uplink), so whoever opens their mic is audible to everyone
+// immediately. Talking is gated solely by the mic button (toggleVoiceMute).
+export function joinVoice() {
   if (voice.joined) return;
   voice.joined = true;
-  voice.muted = false;
-  try {
-    await startMic();
-  } catch {
-    // No mic is no reason not to listen: join muted so peers see the state.
-    voice.muted = true;
-    toast('Joined listen-only. Allow mic access to talk.');
-  }
-  send({ t: 'voiceJoin' });
-  if (voice.muted) send({ t: 'voiceMute', muted: true });
+  voice.muted = true;
+  voice.optedOut = false;
+  send({ t: 'voiceJoin', muted: true });
   renderVoiceDock();
+}
+
+// Runs on every room snapshot (create, join, resume) so voice comes back
+// after a reconnect without a gesture; audio that starts before the next tap
+// is caught by the pointerdown autoplay retry in voicePeer.
+export function ensureVoice() {
+  if (state.room && !voice.optedOut) joinVoice();
 }
 
 export function leaveVoice(notify = true) {
   if (!voice.joined) return;
-  if (notify) send({ t: 'voiceLeave' });
+  if (notify) {
+    // An explicit Leave is an opt-out: stay out of voice until the user taps
+    // the join button again, even across room snapshots.
+    voice.optedOut = true;
+    send({ t: 'voiceLeave' });
+  }
   stopMeters();
   voice.peers.forEach(entry => {
     try { entry.pc.close(); } catch {}

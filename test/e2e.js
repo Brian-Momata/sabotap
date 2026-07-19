@@ -546,15 +546,17 @@ async function main() {
     V1.send({ t: 'voiceJoin' });
     const vs1 = await V2.waitFor('voiceState', m => m.members.length === 1);
     assert(vs1.members[0].name === 'Pia' && vs1.members[0].muted === false, 'voice join broadcast to the room');
-    V2.send({ t: 'voiceJoin' });
+    V2.send({ t: 'voiceJoin', muted: true });
     const vsBoth = await V1.waitFor('voiceState', m => m.members.length === 2);
+    assert(vsBoth.members.find(x => x.id === hv2.you.id).muted === true,
+      'listen-only join (voiceJoin with muted) lands muted, no unmuted flash');
     assert(Array.isArray(vsBoth.peers) && vsBoth.peers.length === 1 && vsBoth.peers[0] === hv2.you.id,
       'voiceState names the peers you may connect to');
     V1.send({ t: 'rtc', to: hv2.you.id, data: { sdp: { type: 'offer', sdp: 'x' } } });
     const relay = await V2.waitFor('rtc');
     assert(relay.from === hv1.you.id && relay.data.sdp.type === 'offer', 'rtc signaling relayed between voice members');
     V1.send({ t: 'voiceMute', muted: true });
-    const vsMute = await V2.waitFor('voiceState', m => m.members.some(x => x.muted));
+    const vsMute = await V2.waitFor('voiceState', m => m.members.some(x => x.id === hv1.you.id && x.muted));
     assert(vsMute.members.find(x => x.id === hv1.you.id).muted === true, 'mute state broadcast');
     V2.send({ t: 'voiceLeave' });
     const vsLeave = await V1.waitFor('voiceState', m => m.members.length === 1);
