@@ -1,7 +1,7 @@
 /* Your side of room voice: membership, the microphone, and the dock controls.
    The mesh lives in voice-peers.js, the shared record in voice-state.js. */
 
-import { $, state } from './state.js';
+import { $, state, isSolo } from './state.js';
 import { send } from './net.js';
 import { toast } from './ui.js';
 import { renderLobby } from './lobby.js';
@@ -109,7 +109,16 @@ export function joinVoice() {
 // a reconnect without a gesture; audio that starts before the next tap is
 // caught by the pointerdown autoplay retry in voice-peers.js.
 export function ensureVoice() {
-  if (state.room && !voice.optedOut) joinVoice();
+  if (!state.room) return;
+  // A solo room has one seat, so there is never anyone to hear or be heard by.
+  // A mic still live from the previous room has to be released rather than just
+  // hidden — and without notify, so this never reads as an explicit opt-out and
+  // silences the next real room.
+  if (isSolo()) {
+    if (voice.joined) leaveVoice(false);
+    return;
+  }
+  if (!voice.optedOut) joinVoice();
 }
 
 export function leaveVoice(notify = true) {
@@ -145,7 +154,7 @@ export function toggleVoiceMute() {
 
 export function renderVoiceDock() {
   const dock = $('voiceDock');
-  const inRoom = !!state.room && !$('s-home').classList.contains('on');
+  const inRoom = !!state.room && !isSolo() && !$('s-home').classList.contains('on');
   dock.hidden = !inRoom;
   if (!inRoom) return;
   // during a match the dock lives in the game header so it never covers the grid

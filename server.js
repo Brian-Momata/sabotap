@@ -226,6 +226,15 @@ wss.on('connection', (ws, req) => {
       notifyPresence(me.id);
     },
 
+    solo() {
+      leaveRoom(me.id);
+      const room = createRoom();
+      room.setSolo(); // before the seat exists: nobody to broadcast the change to
+      room.addPlayer({ id: me.id, name: me.name, tag: me.tag, ws });
+      roomOf.set(me.id, room.code);
+      notifyPresence(me.id);
+    },
+
     join(msg) {
       const code = String(msg.code || '').trim().toUpperCase();
       const room = rooms.get(code);

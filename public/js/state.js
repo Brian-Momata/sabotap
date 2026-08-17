@@ -14,6 +14,10 @@ export const prefs = {
 
 export const $ = id => document.getElementById(id);
 
+// Read from the room message rather than state.mode so it is correct from the
+// first render, before any lobby pass has run.
+export const isSolo = () => !!state.room && state.room.settings && state.room.settings.mode === 'solo';
+
 export function esc(s) {
   const d = document.createElement('div');
   d.textContent = s;

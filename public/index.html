@@ -44,6 +44,8 @@
         <input type="text" id="codeInput" class="mono" placeholder="ROOM CODE" maxlength="8" autocomplete="off">
         <button class="chip-btn ghost" id="joinBtn" style="padding: 14px 20px;">Join</button>
       </div>
+      <button class="btn btn-ghost" id="soloBtn">Play Solo</button>
+      <div class="diff-hint" style="text-align: center;">No one around? Search against the bot and see how long your streak lasts.</div>
     </div>
 
     <div class="install-card" id="installCard" hidden>
@@ -115,7 +117,7 @@
 
     <div id="lobbyPlayers"></div>
 
-    <div class="section-label">Mode</div>
+    <div class="section-label" id="modeLabel">Mode</div>
     <div class="setting-group" id="modeGroup"></div>
     <div class="diff-hint" id="modeHint"></div>
 
@@ -128,7 +130,7 @@
     <div id="boardGroup"></div>
 
     <div class="section-label">How to play</div>
-    <div class="card rules-card">
+    <div class="card rules-card" id="rulesCard">
       <p>Each round, one of you is the <b class="pink">Searcher</b>, the other the <b class="cyan">Caller</b>. Roles swap every round.</p>
       <p>The <b class="cyan">Caller</b> secretly picks a target number from the grid, then earns sabotage charges by solving quick puzzles, and spends them to mess with the Searcher's grid.</p>
       <p>The <b class="pink">Searcher</b> must find and tap the target before the fuse fills.</p>
@@ -216,6 +218,7 @@
     <div class="eyebrow" style="margin: 18px 0 34px;">Match Complete</div>
     <div class="verdict" id="verdict">YOU WIN</div>
     <div class="final-score" id="finalScore">3–1</div>
+    <div class="diff-hint" id="soloBest" style="text-align: center;" hidden></div>
     <div class="history-dots" id="historyDots"></div>
     <div class="round-log" id="roundLog"></div>
     <div class="stack" style="margin-top: auto;">

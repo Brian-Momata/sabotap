@@ -20,6 +20,10 @@ Open the URL on two phones (same network, or deploy anywhere that supports WebSo
 3. Each round: the Caller secretly picks the target, then loses the grid and earns sabotage charges by solving puzzles (cap 3). Each sabotage has its own cooldown, and none ever touches or highlights the target tile. Sabotages: **Blur**, **Decoys** (fake "found it" flashes), **Swap** (two tiles trade places), **Zoom** (forces panning), **Invert**.
 4. Correct tap → Searcher takes the round. Fuse fills → Caller takes it.
 
+## Solo run
+
+No second phone? **Play Solo** puts you in a one-seat room against **SABO**, the caller bot. You are the Searcher every round — the bot picks the target, solves its own puzzles to bank charges, and spends them sabotaging your grid. Every target you find extends your streak; the first time the fuse beats you, the run is over. The bot only ever calls, deliberately: four of the five sabotages are pure perception effects, so a Searcher bot would have to fake visual search rather than play the game. Your chosen difficulty still sets the fuse and puzzle pace, while the streak sharpens the bot — better puzzle accuracy, faster reactions, more sabotage (`solo.ladder` in `lib/config.js`). Solo rooms can't be joined and survive a server restart with the streak intact.
+
 ## Voice chat
 
 Every room has built-in voice chat — tap the 🎙 pill (bottom-right) to join; everyone in the room who joins can talk, across the lobby, matches, and tournament waits. Audio is peer-to-peer WebRTC (the game server only relays call setup), with mute and leave controls. Whoever is talking lights up: their lobby mic badge glows and the voice pill shows their name, so a room full of people always knows who has the floor. Links that stall or fail are rebuilt automatically; if a pair still cannot connect after retries the voice pill turns red and names the player it cannot reach. That means the two networks need a relay — set `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` env vars to add TURN. `window.voiceDiag()` in the browser console dumps per-peer connection state and a log of recent voice transitions.
@@ -47,9 +51,10 @@ No accounts, but the profile still moves: the home screen's **Account** card iss
   - `sabotages.js` — one effect function per sabotage kind; adding a kind means a config entry + one function here, `Match` stays untouched.
   - `boards.js` — board themes ("maps"): per-board grid/puzzle strategies (Hall of Mirrors twins, Glyphs symbols) and the Rotation cycle; Blackout and Drift are client-visual only.
   - `puzzle.js`, `grid.js`, `round-robin.js`, `room-code.js`, `rng.js` — pure helpers.
-  - `tournament.js` — round-robin schedule, stages, standings, walkovers/forfeits.
+  - `versus.js`, `solo.js`, `tournament.js` — one module per mode: the 1v1 match, the solo survival run, and the round-robin schedule (stages, standings, walkovers/forfeits).
+  - `bot.js` — the solo Caller bot. A Match port with a lifecycle, so its timers pause and clear with the round; skill ramps with the player's streak.
   - `voice-channel.js` — voice roster + WebRTC signaling relay, scoped by a room-supplied group function.
-  - `room.js` — roster, lobby settings, mode dispatch (versus vs tournament).
+  - `room.js` — roster, lobby settings, mode dispatch (versus / solo / tournament).
   - `reconnect.js` — disconnect grace, seat re-attachment, and resume snapshots for a room.
   - `serialize.js` + `persistence.js` — room/match/tournament state to `data/rooms.json` and back: rooms survive server restarts, revived paused until players reconnect.
   - `index.js` — the package's public surface (`Room`, `Match`, …).

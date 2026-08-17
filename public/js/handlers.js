@@ -1,6 +1,6 @@
 /* Server-message dispatch table: one handler per message type. */
 
-import { $, state, LS } from './state.js';
+import { $, state, LS, isSolo } from './state.js';
 import { send } from './net.js';
 import { sfx, buzz } from './audio.js';
 import { show, toast } from './ui.js';
@@ -201,8 +201,15 @@ export const handlers = {
       else if (cs[msg.targetIndex]) cs[msg.targetIndex].classList.add('reveal');
     }
     const won = msg.winnerSeat === state.matchSeat;
-    $('roundOverlayEyebrow').textContent = msg.matchOver ? 'Match point' : `Round ${state.round}`;
-    $('roundOverlayTitle').textContent = won ? 'Round yours' : 'Round lost';
+    // Solo is a streak, not a scoreline: the overlay counts survived rounds up
+    // and names the end of the run rather than a match point.
+    if (isSolo()) {
+      $('roundOverlayEyebrow').textContent = msg.matchOver ? 'Run over' : 'Solo run';
+      $('roundOverlayTitle').textContent = won ? `Streak ${msg.score[state.matchSeat]}` : 'Caught by the fuse';
+    } else {
+      $('roundOverlayEyebrow').textContent = msg.matchOver ? 'Match point' : `Round ${state.round}`;
+      $('roundOverlayTitle').textContent = won ? 'Round yours' : 'Round lost';
+    }
     $('roundOverlayTitle').style.color = won ? 'var(--win)' : 'var(--danger)';
     $('roundOverlaySub').textContent = msg.reason === 'found'
       ? `The target ${msg.target} was found.`

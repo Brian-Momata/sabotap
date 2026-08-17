@@ -1,6 +1,6 @@
 /* Entry point: static UI wiring, boot sequence, socket connection. */
 
-import { $, LS, state, prefs } from './state.js';
+import { $, LS, state, prefs, isSolo } from './state.js';
 import { connect, send } from './net.js';
 import { show, toast } from './ui.js';
 import { renderLobby } from './lobby.js';
@@ -24,6 +24,7 @@ $('nameInput').addEventListener('input', () => setAvatarFromName($('nameInput').
 $('nameEditBtn').onclick = () => { const i = $('nameInput'); i.focus(); i.select(); };
 
 $('createBtn').onclick = () => send({ t: 'create' });
+$('soloBtn').onclick = () => send({ t: 'solo' });
 
 $('joinBtn').onclick = () => {
   const code = $('codeInput').value.trim().toUpperCase();
@@ -71,7 +72,8 @@ $('leaveBtn').onclick = () => send({ t: 'leave' });
 
 $('rematchBtn').onclick = () => {
   send({ t: 'rematch' });
-  $('rematchBtn').textContent = 'Waiting for opponent…';
+  // A solo run restarts immediately; only a versus rematch waits on a vote.
+  if (!isSolo()) $('rematchBtn').textContent = 'Waiting for opponent…';
 };
 $('backHomeBtn').onclick = () => {
   // Return to the shared room lobby (keeps the same code for another match);

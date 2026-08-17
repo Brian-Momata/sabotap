@@ -27,6 +27,12 @@ const ENV = {
   ROOM_AUTOSAVE_MS: '300',
   ROOM_SAVE_DEBOUNCE_MS: '50',
   WS_HEARTBEAT_MS: '150',
+  // Pin the solo bot so its behaviour is deterministic and fast: it always
+  // solves its puzzle, and thinks/reacts/fires in milliseconds.
+  SOLO_PICK_DELAY_MS: '150',
+  SOLO_REACTION_MS: '80',
+  SOLO_SABOTAGE_DELAY_MS: '120',
+  SOLO_ACCURACY: '1',
 };
 
 let passed = 0;
@@ -1034,6 +1040,80 @@ async function main() {
     assert(rem[0].board.key === 'drift', 'rematch continues the rotation where the last match stopped');
     RO1.close();
     RO2.close();
+
+    // --- solo run: one human pinned to Searcher against the caller bot ---
+    const SOLO = new Client('SOLO');
+    await SOLO.connect();
+    const soloId = 'test_solo_' + Date.now();
+    SOLO.send({ t: 'hello', playerId: soloId, name: 'Sol' });
+    await SOLO.waitFor('hello');
+    SOLO.send({ t: 'solo' });
+    const soloRoom = await SOLO.waitFor('room');
+    assert(soloRoom.settings.mode === 'solo', 'solo opens a room in solo mode');
+    assert(soloRoom.minPlayers === 1 && soloRoom.maxPlayers === 1, 'a solo room seats exactly one player');
+
+    // The seat cap is what keeps a run private — the code must be unusable.
+    const INT = new Client('INT');
+    await INT.connect();
+    INT.send({ t: 'hello', playerId: 'test_int_' + Date.now(), name: 'Ivy' });
+    await INT.waitFor('hello');
+    INT.send({ t: 'join', code: soloRoom.code });
+    const intErr = await INT.waitFor('error');
+    assert(/full/i.test(intErr.msg), 'nobody can join a solo room, even with the code');
+    INT.close();
+
+    SOLO.send({ t: 'settings', mode: 'tournament' });
+    SOLO.send({ t: 'settings', difficulty: 'casual' });
+    const soloSet = await SOLO.waitFor('room', m => m.settings.difficulty === 'casual');
+    assert(soloSet.settings.mode === 'solo', 'a solo room cannot be switched to another mode');
+
+    SOLO.send({ t: 'start' });
+    const sr1 = await SOLO.waitFor('roundStart');
+    assert(sr1.role === 'searcher' && sr1.callerSeat === 1, 'solo seats the human as Searcher and the bot as Caller');
+    assert(sr1.grid === undefined, "solo searcher gets no grid during the bot's pick");
+    assert(sr1.opponent === 'SABO', 'the bot is named as the opponent');
+
+    // No pick message is ever sent for the bot: it chooses its own target.
+    const slive1 = await SOLO.waitFor('live');
+    assert(Array.isArray(slive1.grid) && slive1.grid.length === 56, 'the bot picking a target opens the searcher grid');
+    assert(slive1.grid.includes(slive1.target), 'the bot targets a real tile on the board');
+
+    // The bot solves its puzzles, banks charges, and spends them unprompted.
+    const sab = await SOLO.waitFor('sabotage');
+    assert(typeof sab.kind === 'string' && sab.durationMs > 0, `the bot fires sabotages on its own (${sab.kind})`);
+
+    SOLO.send({ t: 'tap', index: slive1.grid.indexOf(slive1.target) });
+    const sEnd1 = await SOLO.waitFor('roundEnd');
+    assert(sEnd1.winnerSeat === 0 && sEnd1.matchOver === false, 'a found target extends the run instead of ending it');
+    const sr2 = await SOLO.waitFor('roundStart', m => m.round === 2);
+    assert(sr2.role === 'searcher' && sr2.callerSeat === 1, 'solo roles never swap between rounds');
+    assert(sr2.score[0] === 1, 'the streak carries into the next round');
+
+    // A run survives a redeploy mid-round, bot and all.
+    await SOLO.waitFor('live');
+    await restartServer();
+    const SOLOb = new Client('SOLOb');
+    await SOLOb.connect();
+    SOLOb.send({ t: 'hello', playerId: soloId, name: 'Sol' });
+    await SOLOb.waitFor('hello');
+    const sres = await SOLOb.waitFor('resume');
+    assert(sres.settings.mode === 'solo' && sres.match, 'restart: the solo run is revived from disk');
+    assert(sres.match.role === 'searcher' && sres.match.score[0] === 1,
+      'restart: pinned roles and the streak survive');
+    // Solo has no second human to wait for, so the revived run resumes at once.
+    const sfuse = await SOLOb.waitFor('fuse');
+    assert(sfuse.v > 0, 'restart: a solo run resumes immediately rather than waiting for an opponent');
+
+    // Stall out: the first fuse-out ends the run.
+    const sEnd2 = await SOLOb.waitFor('roundEnd', m => m.matchOver === true, 12000);
+    assert(sEnd2.winnerSeat === 1 && sEnd2.reason === 'fuse', 'the first fuse-out ends the run');
+    const sMatchEnd = await SOLOb.waitFor('matchEnd');
+    assert(sMatchEnd.solo === true && sMatchEnd.streak === 1, 'solo publishes the run as a streak');
+
+    SOLOb.send({ t: 'rematch' });
+    const sr3 = await SOLOb.waitFor('roundStart', m => m.round === 1);
+    assert(sr3.role === 'searcher' && sr3.score[0] === 0, 'a solo rematch starts a fresh run on the spot');
+    SOLOb.close();
 
     // --- liveness: app-level ping/pong and zombie termination ---
     const HB = new Client('HB');

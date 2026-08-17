@@ -1,6 +1,6 @@
 /* Lobby screen: player roster, mode/rounds/difficulty settings, start button. */
 
-import { $, state, esc } from './state.js';
+import { $, state, esc, isSolo } from './state.js';
 import { send } from './net.js';
 import { voice } from './voice-state.js';
 import { applySpeakingClasses } from './voice-meter.js';
@@ -13,6 +13,7 @@ export function renderLobby() {
   $('lobbyCode').textContent = r.code;
   const isHost = state.seat === (r.host || 0);
   const tourn = state.mode === 'tournament';
+  const solo = isSolo();
   const maxP = r.maxPlayers || (tourn ? 8 : 2);
   const minP = r.minPlayers || (tourn ? 3 : 2);
 
@@ -31,22 +32,36 @@ export function renderLobby() {
     row.append(chip);
     wrap.append(row);
   }
-  if (r.players.length < maxP) {
+  if (solo) {
+    // The bot has no roster seat (it lives inside the match), so the opponent
+    // row is drawn here purely so the lobby reads like every other one.
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    row.innerHTML = '<span class="dot online"></span><span style="flex:1">SABO</span><span class="row-chip">BOT</span>';
+    wrap.append(row);
+  } else if (r.players.length < maxP) {
     const row = document.createElement('div');
     row.className = 'player-row';
     row.innerHTML = `<span class="dot"></span><span class="muted">Waiting for players… (${r.players.length}/${tourn ? maxP : 2})</span>`;
     wrap.append(row);
   }
 
-  renderSegs('modeGroup', ['versus', 'tournament'], state.mode, isHost,
-    v => send({ t: 'settings', mode: v }), k => (k === 'versus' ? '1 v 1' : 'Tournament'));
-  $('modeHint').textContent = tourn
-    ? `${minP}–${maxP} players · round-robin, everyone plays everyone · 2 rounds per match · most round wins takes it`
-    : '';
+  // A solo room is a single seat by construction: nobody can join it, so the
+  // invite link and the mode/length pickers have nothing to act on.
+  $('shareBtn').hidden = solo;
+  $('modeLabel').hidden = solo;
+  $('modeGroup').hidden = solo;
+  if (!solo) {
+    renderSegs('modeGroup', ['versus', 'tournament'], state.mode, isHost,
+      v => send({ t: 'settings', mode: v }), k => (k === 'versus' ? '1 v 1' : 'Tournament'));
+  }
+  $('modeHint').textContent = solo
+    ? 'Solo run · you search every round · one miss ends it'
+    : (tourn ? `${minP}–${maxP} players · round-robin, everyone plays everyone · 2 rounds per match · most round wins takes it` : '');
 
-  $('roundsLabel').hidden = tourn;
-  $('roundsGroup').hidden = tourn;
-  if (!tourn) {
+  $('roundsLabel').hidden = tourn || solo;
+  $('roundsGroup').hidden = tourn || solo;
+  if (!tourn && !solo) {
     renderSegs('roundsGroup', (state.config?.roundsToWinOptions) || [2, 3, 5], r.settings.roundsToWin, isHost,
       v => send({ t: 'settings', roundsToWin: v }), v => `${v} wins`);
   }
@@ -57,10 +72,15 @@ export function renderLobby() {
   $('diffHint').textContent = cur ? `${cur.fuseMs / 1000}s fuse. Faster fuse, faster puzzles, trickier digits.` : '';
 
   renderBoards(r, isHost);
+  renderRules(solo);
 
   const btn = $('startBtn');
   btn.classList.remove('btn-ready');
-  if (isHost) {
+  if (solo) {
+    // No roster to wait on — the only gate is the player tapping start.
+    btn.disabled = false;
+    btn.textContent = 'Start Run';
+  } else if (isHost) {
     const others = r.players.filter(p => p.seat !== (r.host || 0));
     const allReady = others.length && others.every(p => p.ready);
     const enough = r.players.length >= minP && (tourn || r.players.length === 2);
@@ -79,6 +99,24 @@ export function renderLobby() {
     }
   }
   applySpeakingClasses(); // re-attach highlights after the innerHTML rebuild
+}
+
+// Solo changes the rules enough to be worth restating: roles never swap, and
+// the run is scored as a streak rather than as a race to N wins. Static markup
+// only — nothing here comes from a player.
+const VERSUS_RULES = `
+  <p>Each round, one of you is the <b class="pink">Searcher</b>, the other the <b class="cyan">Caller</b>. Roles swap every round.</p>
+  <p>The <b class="cyan">Caller</b> secretly picks a target number from the grid, then earns sabotage charges by solving quick puzzles, and spends them to mess with the Searcher's grid.</p>
+  <p>The <b class="pink">Searcher</b> must find and tap the target before the fuse fills.</p>
+  <p>Find it in time → Searcher takes the round. Fuse fills first → Caller takes it.</p>`;
+const SOLO_RULES = `
+  <p>You are the <b class="pink">Searcher</b> every round. <b class="cyan">SABO</b> calls: it picks the target, banks charges, and sabotages your grid.</p>
+  <p>Find and tap the target before the fuse fills to extend your streak.</p>
+  <p>The fuse beating you once ends the run — there is no second chance.</p>
+  <p>The longer you last, the sharper SABO gets: faster reactions, more charges, more sabotage.</p>`;
+
+function renderRules(solo) {
+  $('rulesCard').innerHTML = solo ? SOLO_RULES : VERSUS_RULES;
 }
 
 // Host picks from motif cards; everyone else sees the current pick read-only.
