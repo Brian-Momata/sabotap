@@ -13,7 +13,9 @@ import {
 import { handleSabotage, applySwap, resetEffects } from './sabotage-fx.js';
 import { startCountdown, renderStandings, TWAIT_STATUS } from './tournament-view.js';
 import { renderResults } from './results.js';
-import { voice, voiceAllowed, voicePeer, syncVoicePeers, ensureVoice, leaveVoice, renderVoiceDock } from './voice.js';
+import { voice } from './voice-state.js';
+import { syncPeers, handleSignal } from './voice-peers.js';
+import { ensureVoice, leaveVoice, renderVoiceDock } from './voice.js';
 import { showLinkCode, showRecoveryCode } from './identity-ui.js';
 
 function hideInvite() {
@@ -299,28 +301,13 @@ export const handlers = {
   voiceState(msg) {
     voice.members = msg.members || [];
     voice.allowed = Array.isArray(msg.peers) ? new Set(msg.peers) : null;
-    syncVoicePeers();
+    syncPeers();
     renderVoiceDock();
     if (state.phase === 'lobby' && state.room) renderLobby();
   },
 
-  async rtc(msg) {
-    if (!voice.joined || !voiceAllowed(msg.from)) return;
-    const entry = voice.peers.get(msg.from) || voicePeer(msg.from, false);
-    const pc = entry.pc;
-    try {
-      if (msg.data.sdp) {
-        await pc.setRemoteDescription(msg.data.sdp);
-        if (msg.data.sdp.type === 'offer') {
-          await pc.setLocalDescription();
-          send({ t: 'rtc', to: msg.from, data: { sdp: pc.localDescription } });
-        }
-        while (entry.pendingIce.length) pc.addIceCandidate(entry.pendingIce.shift()).catch(() => {});
-      } else if (msg.data.ice) {
-        if (pc.remoteDescription) await pc.addIceCandidate(msg.data.ice);
-        else entry.pendingIce.push(msg.data.ice);
-      }
-    } catch {}
+  rtc(msg) {
+    handleSignal(msg);
   },
 
   toast(msg) {

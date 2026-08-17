@@ -560,6 +560,15 @@ async function main() {
     V1.send({ t: 'voiceMute', muted: true });
     const vsMute = await V2.waitFor('voiceState', m => m.members.some(x => x.id === hv1.you.id && x.muted));
     assert(vsMute.members.find(x => x.id === hv1.you.id).muted === true, 'mute state broadcast');
+    // Reconnect replay: the server drops a disconnected player from voice, so a
+    // returning client rejoins listen-only and immediately restores its talk
+    // intent. Peers must land on unmuted, not on the muted state the rejoin
+    // carried — otherwise a network blip silently mutes whoever was talking.
+    V1.send({ t: 'voiceJoin', muted: true });
+    V1.send({ t: 'voiceMute', muted: false });
+    const vsReplay = await V1.waitFor('voiceState', m => m.members.some(x => x.id === hv1.you.id && !x.muted));
+    assert(vsReplay.members.find(x => x.id === hv1.you.id).muted === false,
+      'rejoin then unmute lands unmuted (reconnect keeps talk intent)');
     V2.send({ t: 'voiceLeave' });
     const vsLeave = await V1.waitFor('voiceState', m => m.members.length === 1);
     assert(vsLeave.members[0].id === hv1.you.id, 'voice leave removes member');

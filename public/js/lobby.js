@@ -2,7 +2,7 @@
 
 import { $, state, esc } from './state.js';
 import { send } from './net.js';
-import { voice } from './voice.js';
+import { voice } from './voice-state.js';
 import { applySpeakingClasses } from './voice-meter.js';
 import { BOARD_MOTIF } from './board-themes.js';
 

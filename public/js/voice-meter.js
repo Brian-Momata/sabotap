@@ -4,7 +4,7 @@
    the mesh, so no signaling is needed. */
 
 import { $, state } from './state.js';
-import { voice } from './voice.js';
+import { voice } from './voice-state.js';
 
 const ON_RMS = 0.045;  // level that flips a member to "speaking"
 const OFF_RMS = 0.025; // must stay below this…

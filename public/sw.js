@@ -1,13 +1,14 @@
 'use strict';
 
-const CACHE = 'sabotap-v10';
+const CACHE = 'sabotap-v11';
 const SHELL = [
   '/', '/index.html', '/style.css', '/manifest.webmanifest', '/icons/icon.svg',
   // Keep this list in sync with public/js/ — every module must be precached
   // or an installed PWA breaks offline after the next deploy.
   '/js/main.js', '/js/state.js', '/js/net.js', '/js/audio.js', '/js/ui.js',
   '/js/home.js', '/js/lobby.js', '/js/game-view.js', '/js/tournament-view.js',
-  '/js/results.js', '/js/voice.js', '/js/voice-meter.js', '/js/install.js',
+  '/js/results.js', '/js/voice.js', '/js/voice-state.js', '/js/voice-peers.js',
+  '/js/voice-meter.js', '/js/install.js',
   '/js/handlers.js', '/js/board-themes.js', '/js/sabotage-fx.js',
   '/js/identity-ui.js', '/js/wake-lock.js',
 ];

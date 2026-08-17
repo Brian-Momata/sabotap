@@ -712,6 +712,10 @@ input::placeholder { color: var(--text-3); }
 }
 .voice-dock.inhead .voice-speaker { max-width: 72px; font-size: 10px; }
 
+/* a peer we gave up reaching: the count stops claiming everyone is audible */
+.voice-dock.degraded .voice-count { color: var(--danger); }
+.voice-dock.degraded .voice-count::before { background: var(--danger); animation: none; }
+
 /* in-game: dock sits inline in the game header, not over the grid */
 .voice-dock.inhead {
   position: static;

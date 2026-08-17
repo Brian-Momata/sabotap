@@ -1,64 +1,97 @@
-/* Room voice chat: WebRTC mesh, signaled over the game socket. */
+/* Your side of room voice: membership, the microphone, and the dock controls.
+   The mesh lives in voice-peers.js, the shared record in voice-state.js. */
 
 import { $, state } from './state.js';
 import { send } from './net.js';
 import { toast } from './ui.js';
 import { renderLobby } from './lobby.js';
 import { attachMeter, detachMeter, stopMeters } from './voice-meter.js';
+import { voice, voiceAllowed, log, onVoiceChange } from './voice-state.js';
+import { closeAllPeers, sendMicToPeers } from './voice-peers.js';
 
-export const voice = { joined: false, muted: false, optedOut: false, stream: null, peers: new Map(), members: [], allowed: null };
-window.voice = voice; // exposed for automated tests
-
-// The server scopes who may talk to whom (everyone in the lobby, your match
-// opponent during a game). null means no restriction (older server).
-export function voiceAllowed(id) {
-  return voice.allowed ? voice.allowed.has(id) : true;
+// The roster's mic badge is server state, so every local change is announced.
+function setMuted(muted) {
+  voice.muted = muted;
+  send({ t: 'voiceMute', muted });
+  renderVoiceDock();
 }
 
-function rtcConfig() {
-  return { iceServers: (state.config && state.config.iceServers) || [{ urls: 'stun:stun.l.google.com:19302' }] };
+/* ---------- microphone ----------
+   voice.wantMic is intent and survives everything; voice.stream is a capture
+   session and survives nothing. Keeping them apart is what makes a reconnect
+   resume talking instead of silently muting whoever was mid-sentence.
+   All mic work funnels through one promise chain, so a double tap (or a tap
+   during the permission prompt) can never leave two capture sessions alive. */
+
+let micWork = Promise.resolve();
+
+function setMic(on) {
+  voice.wantMic = on;
+  micWork = micWork.then(applyMic, applyMic);
+  return micWork;
 }
 
-// Mesh audio means each phone uploads its mic once per peer: in a full 8-player
-// waiting channel that is 7 parallel encodes, enough to squeeze the game
-// traffic on weak uplinks. Capping the per-link bitrate keeps the whole mesh
-// inside what one voice call would cost. Only works post-negotiation, hence
-// the connectionstatechange hook.
-function capSenderBitrate(sender) {
-  const maxBitrate = state.config && state.config.voiceMaxBps;
-  if (!maxBitrate) return; // older server: leave the browser default
+async function applyMic() {
+  const want = voice.wantMic && voice.joined;
+  if (want === !!voice.stream) return; // already where we want to be
+  if (!want) {
+    releaseMic();
+    setMuted(true);
+    return;
+  }
+  // The mic is held only while talking: releasing it when muted lets the phone
+  // give the mic (and the call audio route) back to other apps. Hearing peers
+  // never depends on holding it.
+  let stream;
   try {
-    const params = sender.getParameters();
-    if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = maxBitrate;
-    sender.setParameters(params).catch(() => {});
-  } catch {}
-}
-
-// The mic is held only while unmuted: releasing the capture session when muted
-// lets the phone give the mic (and call audio route) back to other apps, e.g.
-// an ongoing WhatsApp call. Hearing peers never depends on having the mic.
-async function startMic() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-  });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
+  } catch (err) {
+    log('mic-denied', err && err.name);
+    voice.wantMic = false;
+    setMuted(true);
+    toast('Microphone blocked. Allow mic access to talk.');
+    return;
+  }
+  // The permission prompt can outlive the reason we asked — a Leave or a socket
+  // drop while it was open must not leave a hot mic nobody is listening to.
+  if (!voice.wantMic || !voice.joined) {
+    stream.getTracks().forEach(tr => tr.stop());
+    log('mic-discarded');
+    return;
+  }
   voice.stream = stream;
-  if (state.you) attachMeter(state.you.id, stream);
   const track = stream.getAudioTracks()[0];
-  voice.peers.forEach(entry => { entry.sender.replaceTrack(track).catch(() => {}); });
+  // An incoming call or another app can take the capture away from us. The
+  // track just ends, and without this we would sit there looking unmuted.
+  track.onended = () => {
+    log('mic-ended');
+    voice.wantMic = false;
+    releaseMic();
+    setMuted(true);
+    toast('Microphone stopped. Tap the mic to talk again.');
+  };
+  if (state.you) attachMeter(state.you.id, stream);
+  sendMicToPeers(track);
+  setMuted(false);
+  log('mic-live');
 }
 
-function stopMic() {
+function releaseMic() {
   if (!voice.stream) return;
   if (state.you) detachMeter(state.you.id);
-  voice.stream.getTracks().forEach(tr => tr.stop());
+  voice.stream.getTracks().forEach(tr => { tr.onended = null; tr.stop(); });
   voice.stream = null;
-  voice.peers.forEach(entry => { entry.sender.replaceTrack(null).catch(() => {}); });
+  sendMicToPeers(null);
+  log('mic-released');
 }
 
+/* ---------- membership ---------- */
+
 // Being in the room means hearing the room: joining is listen-only (no mic
-// permission, no uplink), so whoever opens their mic is audible to everyone
-// immediately. Talking is gated solely by the mic button (toggleVoiceMute).
+// permission, no uplink), so whoever opens their mic is audible immediately.
+// Talking is gated solely by the mic button (toggleVoiceMute).
 export function joinVoice() {
   if (voice.joined) return;
   voice.joined = true;
@@ -66,11 +99,15 @@ export function joinVoice() {
   voice.optedOut = false;
   send({ t: 'voiceJoin', muted: true });
   renderVoiceDock();
+  // Replay talk intent: after a reconnect the permission is already granted, so
+  // this re-opens the mic with no prompt and no gesture.
+  if (voice.wantMic) setMic(true);
+  log('join');
 }
 
-// Runs on every room snapshot (create, join, resume) so voice comes back
-// after a reconnect without a gesture; audio that starts before the next tap
-// is caught by the pointerdown autoplay retry in voicePeer.
+// Runs on every room snapshot (create, join, resume) so voice comes back after
+// a reconnect without a gesture; audio that starts before the next tap is
+// caught by the pointerdown autoplay retry in voice-peers.js.
 export function ensureVoice() {
   if (state.room && !voice.optedOut) joinVoice();
 }
@@ -79,106 +116,32 @@ export function leaveVoice(notify = true) {
   if (!voice.joined) return;
   if (notify) {
     // An explicit Leave is an opt-out: stay out of voice until the user taps
-    // the join button again, even across room snapshots.
+    // the join button again, even across room snapshots — and drop talk intent,
+    // so rejoining starts listen-only like any other join.
     voice.optedOut = true;
+    voice.wantMic = false;
     send({ t: 'voiceLeave' });
   }
-  stopMeters();
-  voice.peers.forEach(entry => {
-    try { entry.pc.close(); } catch {}
-    entry.audio.remove();
-  });
-  voice.peers.clear();
-  if (voice.stream) voice.stream.getTracks().forEach(tr => tr.stop());
-  voice.stream = null;
   voice.joined = false;
-  voice.muted = false;
+  voice.muted = true;
+  stopMeters();
+  closeAllPeers();
+  releaseMic();
   voice.members = [];
   voice.allowed = null;
   renderVoiceDock();
   if (state.phase === 'lobby' && state.room) renderLobby();
+  log(notify ? 'leave' : 'disconnected');
 }
 
-export async function toggleVoiceMute() {
+// Toggles intent, not the capture: tapping again while the permission prompt is
+// open cancels the request instead of queueing a second one.
+export function toggleVoiceMute() {
   if (!voice.joined) return;
-  if (voice.muted) {
-    try {
-      await startMic();
-    } catch {
-      toast('Microphone blocked. Allow mic access to talk.');
-      return;
-    }
-    voice.muted = false;
-  } else {
-    stopMic();
-    voice.muted = true;
-  }
-  send({ t: 'voiceMute', muted: voice.muted });
-  renderVoiceDock();
+  return setMic(!voice.wantMic);
 }
 
-export function voicePeer(id, initiator) {
-  let entry = voice.peers.get(id);
-  if (entry) return entry;
-  const pc = new RTCPeerConnection(rtcConfig());
-  const audio = document.createElement('audio');
-  audio.autoplay = true;
-  audio.playsInline = true;
-  document.body.append(audio);
-  // One sendrecv transceiver per pair, created before any SDP exchange: the
-  // answering side's transceiver is reused for the incoming m-line (JSEP), and
-  // replaceTrack on its sender swaps the mic in/out without renegotiation.
-  // This is what lets a mic-less (muted/blocked) member still hear peers.
-  const sender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
-  entry = { pc, audio, sender, pendingIce: [] };
-  voice.peers.set(id, entry);
-  if (voice.stream) sender.replaceTrack(voice.stream.getAudioTracks()[0]).catch(() => {});
-  pc.onconnectionstatechange = () => { if (pc.connectionState === 'connected') capSenderBitrate(sender); };
-  pc.ontrack = e => {
-    // addTransceiver + replaceTrack sends no stream association (no a=msid in
-    // the SDP), so e.streams is empty — wrap the bare track or nothing plays.
-    const stream = e.streams[0] || new MediaStream([e.track]);
-    audio.srcObject = stream;
-    attachMeter(id, stream);
-    // Autoplay can be blocked when the track arrives outside a user gesture
-    // (e.g. someone joins voice long after we did) — retry on the next tap.
-    audio.play().catch(() => {
-      document.addEventListener('pointerdown', () => audio.play().catch(() => {}), { once: true });
-    });
-  };
-  pc.onicecandidate = e => { if (e.candidate) send({ t: 'rtc', to: id, data: { ice: e.candidate } }); };
-  if (initiator) {
-    pc.onnegotiationneeded = async () => {
-      try {
-        await pc.setLocalDescription();
-        send({ t: 'rtc', to: id, data: { sdp: pc.localDescription } });
-      } catch {}
-    };
-  }
-  return entry;
-}
-
-function dropVoicePeer(id) {
-  const entry = voice.peers.get(id);
-  if (!entry) return;
-  detachMeter(id);
-  try { entry.pc.close(); } catch {}
-  entry.audio.remove();
-  voice.peers.delete(id);
-}
-
-export function syncVoicePeers() {
-  if (!voice.joined || !state.you) return;
-  const ids = new Set(voice.members.map(m => m.id));
-  for (const id of [...voice.peers.keys()]) {
-    if (!ids.has(id) || !voiceAllowed(id)) dropVoicePeer(id);
-  }
-  for (const m of voice.members) {
-    if (m.id === state.you.id || !voiceAllowed(m.id) || voice.peers.has(m.id)) continue;
-    // Exactly one side initiates per pair: the lexically larger id.
-    if (state.you.id > m.id) voicePeer(m.id, true);
-  }
-}
+/* ---------- dock ---------- */
 
 export function renderVoiceDock() {
   const dock = $('voiceDock');
@@ -191,6 +154,7 @@ export function renderVoiceDock() {
   if (dock.parentElement !== wantParent) wantParent.appendChild(dock);
   dock.classList.toggle('inhead', inGame);
   dock.classList.toggle('live', voice.joined);
+  dock.classList.toggle('degraded', voice.joined && voice.unreachable.size > 0);
   $('voiceJoinBtn').hidden = voice.joined;
   $('voiceLive').hidden = !voice.joined;
   if (voice.joined) {
@@ -200,3 +164,20 @@ export function renderVoiceDock() {
     $('voiceMuteBtn').classList.toggle('muted', voice.muted);
   }
 }
+
+// The mesh reports link give-ups on its own timer, not on a server message.
+// Naming the peer once matters: "voice is broken" is unactionable, "can't reach
+// Sam" points at the one pair whose networks need a TURN relay.
+const announced = new Set();
+onVoiceChange(() => {
+  for (const id of voice.unreachable) {
+    if (announced.has(id)) continue;
+    announced.add(id);
+    const m = voice.members.find(x => x.id === id);
+    toast(`Can't reach ${m ? m.name.split(' ')[0] : 'a player'} for voice.`);
+  }
+  for (const id of [...announced]) {
+    if (!voice.unreachable.has(id)) announced.delete(id);
+  }
+  renderVoiceDock();
+});
