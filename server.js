@@ -11,6 +11,8 @@ const Social = require('./lib/social');
 const Identity = require('./lib/identity');
 const { clientConfig } = require('./lib/client-config');
 const { EdgeGuards } = require('./lib/limits');
+const analytics = require('./lib/analytics');
+const { mountStats } = require('./lib/stats-route');
 const { Room, makeRoomCode, RoomPersistence } = require('./lib/game');
 
 const store = new Store(process.env.STORE_FILE || path.join(__dirname, 'data', 'store.json'));
@@ -19,6 +21,9 @@ const roomStore = new Store(
   { rooms: {} },
   CONFIG.roomPersist.debounceMs
 );
+
+// The only event names a client may report (see the `stat` handler).
+const CLIENT_STATS = new Set(['install.prompted', 'install.accepted', 'install.dismissed', 'voice.micDenied']);
 
 const rooms = new Map(); // code -> Room
 const roomOf = new Map(); // playerId -> code
@@ -42,6 +47,7 @@ function helloPayload(t, profile) {
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size, online: social.online.size }));
+mountStats(app);
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: CONFIG.net.maxPayloadBytes });
@@ -129,6 +135,7 @@ wss.on('connection', (ws, req) => {
   let me = null; // profile after hello
   let claimFails = 0;
   let authFails = 0;
+  let sessionAt = 0; // first hello on this socket; one session per connection
 
   const handlers = {
     // App-level liveness probe: browsers can't see ws protocol pings, so the
@@ -160,6 +167,12 @@ wss.on('connection', (ws, req) => {
       if (prev && prev !== ws) { try { prev.close(); } catch {} }
       me = profile;
       social.online.set(id, ws);
+      const { isNew } = analytics.seen(id);
+      if (!sessionAt) {
+        sessionAt = Date.now();
+        // `client` is additive and optional: older clients simply report nothing.
+        analytics.track('session', { isNew, standalone: !!(msg.client && msg.client.standalone) });
+      }
       send(ws, helloPayload('hello', me));
       notifyPresence(id);
       // Re-attach to a live seat if this device was mid-game.
@@ -203,6 +216,7 @@ wss.on('connection', (ws, req) => {
         social.discardIfUnused(oldId);
       }
       me = adopted;
+      analytics.seen(targetId);
       social.online.set(targetId, ws);
       if (oldId) notifyPresence(oldId);
       notifyPresence(targetId);
@@ -219,6 +233,7 @@ wss.on('connection', (ws, req) => {
     },
 
     create() {
+      analytics.track('room.create');
       leaveRoom(me.id);
       const room = createRoom();
       room.addPlayer({ id: me.id, name: me.name, tag: me.tag, ws });
@@ -227,6 +242,7 @@ wss.on('connection', (ws, req) => {
     },
 
     solo() {
+      analytics.track('room.solo');
       leaveRoom(me.id);
       const room = createRoom();
       room.setSolo(); // before the seat exists: nobody to broadcast the change to
@@ -238,6 +254,7 @@ wss.on('connection', (ws, req) => {
     join(msg) {
       const code = String(msg.code || '').trim().toUpperCase();
       const room = rooms.get(code);
+      analytics.track('room.join', { found: !!room });
       if (!room) {
         // Misses spend the per-IP failure budget — the code space is small
         // enough to enumerate, so guessing has to be expensive.
@@ -330,6 +347,7 @@ wss.on('connection', (ws, req) => {
       if (theirWs && !res.autoAccepted) {
         send(theirWs, { t: 'friendRequest', from: { id: me.id, name: me.name, tag: me.tag } });
       }
+      analytics.track('friend.add', { autoAccepted: !!res.autoAccepted });
       send(ws, { t: 'toast', msg: res.autoAccepted ? `You and ${res.friend.name} are now friends.` : `Request sent to ${res.friend.name}.` });
     },
 
@@ -348,8 +366,17 @@ wss.on('connection', (ws, req) => {
       if (!friend) return send(ws, { t: 'error', msg: 'Not in your friends list.' });
       const theirWs = social.online.get(friend.id);
       if (!theirWs) return send(ws, { t: 'error', msg: `${friend.name} is offline.` });
+      analytics.track('invite.sent');
       send(theirWs, { t: 'invite', from: { id: me.id, name: me.name, tag: me.tag }, code, ttlMs: CONFIG.inviteTtlMs });
       send(ws, { t: 'toast', msg: `Invite sent to ${friend.name}.` });
+    },
+
+    // Counters for the few things only the client can see (did the install
+    // prompt convert, did the mic get denied). Allowlisted: a client may bump
+    // one of these names and nothing else, so the taxonomy stays server-owned.
+    stat(msg) {
+      const key = String(msg.k || '');
+      if (CLIENT_STATS.has(key)) analytics.track('client', { k: key });
     },
 
     inviteDecline(msg) {
@@ -393,10 +420,12 @@ wss.on('connection', (ws, req) => {
       notifyPresence(me.id);
       const room = roomFor(me.id);
       if (room) {
+        if (room.phase === 'playing') analytics.track('player.drop', { mode: room.settings.mode });
         room.handleDisconnect(me.id);
         persistence.touch(room);
       }
     }
+    if (sessionAt) analytics.track('session.end', { minutes: Math.round(((Date.now() - sessionAt) / 60000) * 10) / 10 });
   });
 });
 
@@ -407,5 +436,6 @@ server.listen(CONFIG.port, () => {
   console.log(`${CONFIG.name} listening on http://localhost:${CONFIG.port}`);
 });
 
-process.on('SIGINT', () => { guards.destroy(); store.flush(); persistence.flushAll(); process.exit(0); });
-process.on('SIGTERM', () => { guards.destroy(); store.flush(); persistence.flushAll(); process.exit(0); });
+const shutdown = () => { guards.destroy(); store.flush(); persistence.flushAll(); analytics.flush(); process.exit(0); };
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

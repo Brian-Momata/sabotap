@@ -4,8 +4,11 @@
 #
 # Free-tier trade-offs:
 # - The service sleeps after ~15 min idle; first request takes ~30-60s to wake.
-# - The disk is ephemeral: friend lists (data/store.json) reset on restarts.
-#   Matches are unaffected (rooms are in-memory by design).
+# - The disk is ephemeral: friend lists (data/store.json) and usage counters
+#   (data/analytics.json) reset on restarts. Matches are unaffected (rooms are
+#   in-memory by design).
+# - /stats stays loopback-only until you add an ANALYTICS_TOKEN env var in the
+#   dashboard; set one there rather than committing it here.
 services:
   - type: web
     name: sabotap
@@ -21,3 +24,22 @@ services:
       # limits in lib/limits.js would key every client on the proxy's address.
       - key: TRUST_PROXY
         value: "1"
+      # Gate for /stats. Render generates the value on first deploy; read it in
+      # the dashboard under Environment. Behind Render's proxy this is the only
+      # way in — the loopback fallback in lib/stats-route.js can never match.
+      - key: ANALYTICS_TOKEN
+        generateValue: true
+      # On the free plan every restart (including each idle spin-down) resets
+      # the filesystem, so the counters below never accumulate across days.
+      # To keep them, move to a paid instance type and uncomment the disk plus
+      # these paths — that fixes profiles and live rooms surviving too.
+      # - key: ANALYTICS_FILE
+      #   value: /data/analytics.json
+      # - key: STORE_FILE
+      #   value: /data/store.json
+      # - key: ROOMS_FILE
+      #   value: /data/rooms.json
+    # disk:
+    #   name: sabotap-data
+    #   mountPath: /data
+    #   sizeGB: 1

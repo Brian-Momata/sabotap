@@ -16,6 +16,11 @@ primary_region = "jnb"
 
 [env]
   STORE_FILE = "/data/store.json"
+  # Usage counters belong on the volume too — the app directory is rebuilt on
+  # every deploy, which would silently reset the analytics.
+  ANALYTICS_FILE = "/data/analytics.json"
+  # /stats is loopback-only until a token exists:
+  #   fly secrets set ANALYTICS_TOKEN=$(openssl rand -hex 16)
 
 [mounts]
   source = "sabotap_data"

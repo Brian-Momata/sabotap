@@ -49,6 +49,7 @@ async function applyMic() {
     });
   } catch (err) {
     log('mic-denied', err && err.name);
+    send({ t: 'stat', k: 'voice.micDenied' });
     voice.wantMic = false;
     setMuted(true);
     toast('Microphone blocked. Allow mic access to talk.');

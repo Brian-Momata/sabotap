@@ -40,11 +40,20 @@ Every device gets a persistent friend tag (e.g. `BRI#4821`) — no accounts. Add
 
 No accounts, but the profile still moves: the home screen's **Account** card issues a short-lived **link code** (type it on a new phone to make it this player) and a permanent **recovery code** (save it anywhere; it restores the profile — tag, friends and all — if the phone is lost). Claiming mid-match re-seats the new device into the running game.
 
+## Analytics
+
+Every deployment counts its own usage — no third-party script, no new dependency, nothing that follows a player off the site. The server writes **aggregate counters only** to `data/analytics.json`: daily buckets of event counts, the dimensions each event carried (mode, difficulty, board, round outcome, sabotage kind…), running avg/min/max for the numeric ones, and a set of salted-hashed player ids so "how many people" and "did they come back" are answerable without a per-event log or a raw id on disk.
+
+Read it at **`/stats`** (a rendered dashboard) or **`/stats.json`** (the same summary as JSON, `?days=N` to widen the window). Set `ANALYTICS_TOKEN` and pass it as `?key=…`; with no token set the endpoint answers loopback requests only, so a deploy without one is closed rather than public. `ANALYTICS=0` turns collection off entirely.
+
+What it answers: how many played today/this week/this month, how many are new versus returning, which modes and difficulties and boards get chosen, whether matches get finished or abandoned, how rounds end (found vs fuse — crossed with difficulty and board, which is the balance signal), how far solo runs get, which sabotages actually get fired, voice and install adoption, and how often players drop mid-match.
+
 ## Architecture
 
 - `server.js` + `lib/` — Node + Express + `ws`. Fully server-authoritative: grid, target, fuse, puzzles, charges, and sabotage resolution live on the server; clients send intents and render.
 - `lib/config.js` — every playtesting variable (grid size, fuse, puzzle time, sabotage tuning) in one block; numeric values overridable via env vars.
 - `lib/identity.js` — device link codes (short-lived) and recovery codes (persistent) for the account-less identity model. `lib/client-config.js` — the config block shipped in hello payloads (incl. STUN/TURN).
+- `lib/analytics.js` — the usage sink: daily event buckets, capped dimensions, salted-hashed player ids, retention pruning. `lib/stats-route.js` — the `/stats` routes and who may read them; `lib/stats-page.js` — the dashboard HTML, server-rendered so it never enters the PWA cache.
 - `lib/limits.js` — transport-edge abuse limits: WebSocket Origin check, per-IP connection/failure buckets, per-connection message bucket. Identity itself is a public `playerId` plus a private device secret (trust-on-first-use; only the secret authenticates).
 - `lib/game/` — the game domain, one responsibility per module:
   - `match.js` — the 2-player round engine (pick → live → roundEnd), transport-agnostic via injected send ports.
@@ -54,17 +63,18 @@ No accounts, but the profile still moves: the home screen's **Account** card iss
   - `versus.js`, `solo.js`, `tournament.js` — one module per mode: the 1v1 match, the solo survival run, and the round-robin schedule (stages, standings, walkovers/forfeits).
   - `bot.js` — the solo Caller bot. A Match port with a lifecycle, so its timers pause and clear with the round; skill ramps with the player's streak.
   - `voice-channel.js` — voice roster + WebRTC signaling relay, scoped by a room-supplied group function.
+  - `telemetry.js` — the gameplay event taxonomy: what a played match reports and under what name. Modes call it from hooks they already own; adding a measurement never threads analytics through the engine.
   - `room.js` — roster, lobby settings, mode dispatch (versus / solo / tournament).
   - `reconnect.js` — disconnect grace, seat re-attachment, and resume snapshots for a room.
   - `serialize.js` + `persistence.js` — room/match/tournament state to `data/rooms.json` and back: rooms survive server restarts, revived paused until players reconnect.
   - `index.js` — the package's public surface (`Room`, `Match`, …).
 - `public/js/` — vanilla ES-module client: `state` (identity + state bag), `net` (socket + reconnect), `audio`, `ui` (screens/toast), `home`, `identity-ui` (account card: link/recovery/claim), `lobby`, `game-view` (grid/fuse/caller panel), `sabotage-fx` (searcher-side sabotage visuals), `board-themes` (board picker motifs, announce splash, Blackout torch, Drift motion), `tournament-view`, `results`, `voice` (membership + mic + dock), `voice-peers` (WebRTC mesh: perfect negotiation, link recovery), `voice-state` (shared voice record + diagnostics), `voice-meter` (WebAudio speaking detection + highlights), `install` (PWA prompt), `wake-lock` (screen stays on while in a room), `handlers` (server-message dispatch), `main` (wiring + boot). Design tokens are oklch CSS custom properties from the design system.
 - Engineering standard: [docs/ENGINEERING.md](docs/ENGINEERING.md) — hard rules, style, and definition of done for every change.
-- `data/store.json` — profiles and friendships; `data/rooms.json` — live room/match state (both atomic JSON writes). A server restart revives every room paused, mid-round state included.
+- `data/store.json` — profiles and friendships; `data/rooms.json` — live room/match state; `data/analytics.json` — usage counters (all atomic JSON writes). A server restart revives every room paused, mid-round state included.
 - Reconnect grace: a dropped player has 30s to rejoin their seat; the round pauses meanwhile (and resumes only when both players are back).
 
 ## Test
 
 ```bash
-npm test           # scripted two-client e2e: full match, sabotages, rematch, reconnect, friends
+npm test           # scripted two-client e2e: full match, sabotages, rematch, reconnect, friends, analytics
 ```

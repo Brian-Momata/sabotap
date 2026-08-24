@@ -33,6 +33,9 @@ const ENV = {
   SOLO_REACTION_MS: '80',
   SOLO_SABOTAGE_DELAY_MS: '120',
   SOLO_ACCURACY: '1',
+  ANALYTICS_FILE: path.join(os.tmpdir(), `sabotap-test-analytics-${Date.now()}.json`),
+  ANALYTICS_TOKEN: 'test-stats-token',
+  ANALYTICS_SAVE_DEBOUNCE_MS: '50',
 };
 
 let passed = 0;
@@ -1114,6 +1117,63 @@ async function main() {
     const sr3 = await SOLOb.waitFor('roundStart', m => m.round === 1);
     assert(sr3.role === 'searcher' && sr3.score[0] === 0, 'a solo rematch starts a fresh run on the spot');
     SOLOb.close();
+
+    // --- analytics: usage counters, gated dashboard ---
+    const get = (urlPath) => new Promise((resolve, reject) => {
+      http.get(`http://localhost:${PORT}${urlPath}`, res => {
+        let body = '';
+        res.on('data', d => { body += d; });
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      }).on('error', reject);
+    });
+
+    const denied = await get('/stats.json');
+    assert(denied.status === 404, 'the stats endpoint 404s without the token');
+    const wrongKey = await get('/stats.json?key=nope');
+    assert(wrongKey.status === 404, 'a wrong stats token is refused');
+
+    const statsRes = await get(`/stats.json?key=${ENV.ANALYTICS_TOKEN}`);
+    assert(statsRes.status === 200, 'the stats endpoint serves the summary with the token');
+    const stats = JSON.parse(statsRes.body);
+    const ev = stats.totals.events;
+    const dims = stats.totals.dims;
+
+    assert(stats.players.allTime > 0 && stats.players.activeToday > 0, 'players are counted as active');
+    assert(ev.session > 0 && ev['session.end'] > 0, 'sessions are counted at both ends');
+    // Everything above ran across several server restarts, so a non-zero count
+    // here also proves the counters survive a redeploy.
+    assert(ev['match.start'] > 0 && ev['round.end'] > 0, 'matches and rounds are counted, and survive restarts');
+    assert(dims['match.start'].mode.versus > 0 && dims['match.start'].mode.solo > 0,
+      'match starts are broken down by mode');
+    assert(dims['round.end'].reason.found > 0 && dims['round.end'].reason.fuse > 0,
+      'round outcomes record both a find and a fuse-out');
+    assert(Object.keys(dims['round.end'].difficultyOutcome).some(k => k.includes('/fuse')),
+      'round outcomes cross difficulty with the reason');
+    assert(stats.totals.stats['round.end.seconds'].n > 0, 'round duration is measured');
+    assert(dims['sabotage.fire'].kind.blur > 0, 'fired sabotages are counted by kind');
+    assert(ev['solo.end'] > 0 && stats.totals.stats['solo.end.streak'].n > 0, 'solo runs report their streak');
+    assert(dims.session.standalone !== undefined, 'sessions record whether the client is an installed app');
+    assert(ev['room.create'] > 0 && dims['room.join'].found.false > 0,
+      'room entry counts creates and failed joins');
+    assert(ev['voice.join'] > 0, 'voice adoption is counted');
+
+    // The taxonomy is server-owned: a client may only bump allowlisted names.
+    // A fresh client: the earlier restarts left A's socket on a dead server.
+    const ST = new Client('ST');
+    await ST.connect();
+    ST.send({ t: 'hello', playerId: 'test_stat_' + Date.now(), name: 'Stan' });
+    await ST.waitFor('hello');
+    ST.send({ t: 'stat', k: 'install.accepted' });
+    ST.send({ t: 'stat', k: 'not.allowed' });
+    await sleep(200);
+    ST.close();
+    const stats2 = JSON.parse((await get(`/stats.json?key=${ENV.ANALYTICS_TOKEN}`)).body);
+    assert(stats2.totals.dims.client.k['install.accepted'] === 1, 'an allowlisted client stat is recorded');
+    assert(stats2.totals.dims.client.k['not.allowed'] === undefined, 'an unlisted client stat is ignored');
+
+    const page = await get(`/stats?key=${ENV.ANALYTICS_TOKEN}`);
+    assert(page.status === 200 && /Sabotap usage/.test(page.body), 'the dashboard renders');
+    assert(!/[Pp]layerId|test_a_/.test(page.body), 'the dashboard exposes no raw player ids');
 
     // --- liveness: app-level ping/pong and zombie termination ---
     const HB = new Client('HB');

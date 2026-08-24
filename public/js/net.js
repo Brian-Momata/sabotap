@@ -1,6 +1,6 @@
 /* WebSocket transport: connect with auto-reconnect backoff, plus send(). */
 
-import { LS, state } from './state.js';
+import { LS, state, isStandalone } from './state.js';
 
 let ws = null;
 let reconnectDelay = 500;
@@ -12,7 +12,7 @@ export function connect({ onMessage, onClose }) {
   ws.onopen = () => {
     reconnectDelay = 500;
     lastMsgAt = Date.now();
-    send({ t: 'hello', playerId: LS.playerId, secret: LS.secret, name: LS.name || '' });
+    send({ t: 'hello', playerId: LS.playerId, secret: LS.secret, name: LS.name || '', client: { standalone: isStandalone } });
   };
   ws.onmessage = ev => {
     lastMsgAt = Date.now();

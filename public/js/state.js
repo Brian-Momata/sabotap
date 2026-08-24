@@ -14,6 +14,10 @@ export const prefs = {
 
 export const $ = id => document.getElementById(id);
 
+// Installed-PWA detection, shared by the install card and the hello payload
+// (so usage stats can tell installed play from a browser tab).
+export const isStandalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
 // Read from the room message rather than state.mode so it is correct from the
 // first render, before any lobby pass has run.
 export const isSolo = () => !!state.room && state.room.settings && state.room.settings.mode === 'solo';
